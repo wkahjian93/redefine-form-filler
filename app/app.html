@@ -664,6 +664,7 @@ const IDB = {
    Everyone admitted can read; the platform lets only Editors (or plan members) write. IndexedDB keeps a
    device copy, which is also where a form goes when this person can't write to the library. */
 const CHUNK = 180000;
+const DETECT_V = 2; // raise when box detection improves: forms saved with an older version re-map themselves when opened
 const FormStore = {
   cloud: undefined,
   async conn(){
@@ -682,7 +683,7 @@ const FormStore = {
     return this.cloud;
   },
   doc(f){
-    const d = {name:f.name, kind:f.kind, savedAt:f.savedAt, savedBy:f.savedBy || '', pages:f.pages || 0, hash:f.hash || '', chunks:f.chunks || 0, fields:f.fields, slots:f.slots};
+    const d = {name:f.name, kind:f.kind, savedAt:f.savedAt, savedBy:f.savedBy || '', pages:f.pages || 0, hash:f.hash || '', dv:f.dv || 0, chunks:f.chunks || 0, fields:f.fields, slots:f.slots};
     const out = JSON.parse(JSON.stringify(d));
     if (JSON.stringify(out).length > 240000) out.slots = out.slots.map(s => { delete s.lab; return s; });
     return out;
@@ -1246,6 +1247,7 @@ async function selectForm(id){
   if (customers.length && f.id !== form.id && (f.kind === 'custom' || form.kind === 'custom')) toast('Customers keep their details, but fields only match if both forms use the same names. Re-read files if needed.');
   form = f; formBytes = f.kind === 'preset' ? PRESET_BYTES : new Uint8Array(f.bytes); selSlot = null; addMode = false;
   renderFormList(); await renderFormLayout(); renderCustomers();
+  if (f.kind === 'custom' && f.savedAt && (f.dv || 0) < DETECT_V && !remapping && await ai()) remap();
 }
 let layoutPages = [];
 async function renderFormLayout(){
@@ -1334,23 +1336,26 @@ async function onFormUpload(file){
     if (!det.slots.length) throw new Error('No boxes or lines to write on were found in this form.');
     st.textContent = `Found ${det.slots.length} boxes. Claude is working out what goes in each (this can take 1–2 minutes)…`;
     const m = await mapForm(det, file.name.replace(/\.[^.]+$/, ''));
-    const f = {id:'f-' + uid(), kind:'custom', name:m.name, fields:m.fields, slots:det.slots, bytes:bytes.buffer.slice(0), pages:det.numPages, hash, looksFilled:!!m.looksFilled};
+    const f = {id:'f-' + uid(), kind:'custom', name:m.name, fields:m.fields, slots:det.slots, bytes:bytes.buffer.slice(0), pages:det.numPages, hash, dv:DETECT_V, looksFilled:!!m.looksFilled};
     forms.splice(1, 0, f); await selectForm(f.id);
     st.className = 'status'; st.textContent = `Ready: ${f.slots.filter(s => s.key).length} of ${f.slots.length} boxes mapped to ${f.fields.length} fields. Check the layout on the right, then continue. ${f.looksFilled ? 'This form seems to contain personal details, so it won’t be shared with the team.' : 'After your first export it is saved for the whole team.'}`;
   } catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : (e.message || String(e)); }
 }
+let remapping = false;
 async function remap(){
+  if (remapping) return; remapping = true;
   const st = $('#formStatus'); st.className = 'status busy'; st.textContent = 'Finding the boxes again…';
   try {
     const det = await detectSlots(formBytes);
     if (det.slots.length < 3) det.slots = form.slots.map(s => Object.assign({}, s, {key:undefined, part:undefined, option:undefined}));
     st.textContent = `Found ${det.slots.length} boxes. Claude is working out what goes in each…`;
     const m = await mapForm(det, baseName(form));
-    form.fields = m.fields; form.slots = det.slots; selSlot = null; $('#insp').hidden = true;
+    form.fields = m.fields; form.slots = det.slots; form.dv = DETECT_V; selSlot = null; $('#insp').hidden = true;
     saveFormSoon(); drawSlots();
-    st.className = 'status'; st.textContent = `Re-mapped: ${form.slots.filter(s => s.key).length} of ${form.slots.length} boxes used. Check the layout on the right.`;
+    st.className = 'status'; st.textContent = `Re-mapped: ${form.slots.filter(s => s.key).length} of ${form.slots.length} boxes used. Check the layout on the right, then read the customer details again in step 2.`;
   }
   catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : e.message; }
+  remapping = false;
 }
 
 /* ======================= step 3 UI ======================= */
