@@ -1033,8 +1033,40 @@ async function detectSlots(bytes){
       merged.push(Object.assign({}, c, {n: Math.max(...g.map(o => o.n)), rows: g.map(o => o.y)}));
     });
     C = C.filter(c => c.kind !== 'comb').concat(merged);
+    // table cells: empty cells of a ruled grid are answer spaces, labelled by the cell beside them
+    const hs = segs.filter(([a,b]) => Math.abs(a[1]-b[1]) < .6 && Math.abs(a[0]-b[0]) >= 8).map(([a,b]) => ({at:a[1], lo:Math.min(a[0],b[0]), hi:Math.max(a[0],b[0])}));
+    const vs = segs.filter(([a,b]) => Math.abs(a[0]-b[0]) < .6 && Math.abs(a[1]-b[1]) >= 6).map(([a,b]) => ({at:a[0], lo:Math.min(a[1],b[1]), hi:Math.max(a[1],b[1])}));
+    R.forEach(([x,y,w,h]) => {
+      if (h <= 1.6 && w >= 8) hs.push({at:y+h/2, lo:x, hi:x+w});
+      else if (w <= 1.6 && h >= 6) vs.push({at:x+w/2, lo:y, hi:y+h});
+      else if (w >= 8 && h >= 6){ hs.push({at:y, lo:x, hi:x+w}, {at:y+h, lo:x, hi:x+w}); vs.push({at:x, lo:y, hi:y+h}, {at:x+w, lo:y, hi:y+h}); }
+    });
+    const levels = list => { const out = []; [...list].sort((a,b) => a.at - b.at).forEach(s => { const l = out[out.length-1]; if (l && s.at - l.at < 1.6) l.parts.push(s); else out.push({at:s.at, parts:[s]}); }); return out; };
+    const covered = (parts, lo, hi) => { let reach = lo; [...parts].sort((a,b) => a.lo - b.lo).forEach(p => { if (p.lo <= reach + 2 && p.hi > reach) reach = p.hi; }); return reach >= hi - 2; };
+    const Y = levels(hs), X = levels(vs), cells = [];
+    if (Y.length && X.length && Y.length * X.length < 40000){
+      for (let t = Y.length - 1; t > 0; t--) for (let l = 0; l < X.length - 1; l++){
+        const top = Y[t], left = X[l]; let found = null;
+        for (let b = t - 1; b >= 0 && !found; b--){
+          if (!covered(left.parts, Y[b].at, top.at)) break;
+          if (top.at - Y[b].at < 3) continue;
+          for (let r = l + 1; r < X.length; r++){
+            if (!covered(top.parts, left.at, X[r].at)) break;
+            if (X[r].at - left.at < 3) continue;
+            if (covered(Y[b].parts, left.at, X[r].at) && covered(X[r].parts, Y[b].at, top.at)){ found = {x:left.at, y:Y[b].at, w:X[r].at-left.at, h:top.at-Y[b].at}; break; }
+          }
+        }
+        if (found && !cells.some(c => Math.abs(c.x-found.x) < 1 && Math.abs(c.y-found.y) < 1 && Math.abs(c.w-found.w) < 1 && Math.abs(c.h-found.h) < 1)) cells.push(found);
+      }
+    }
+    const overlap = (a, b) => { const w = Math.min(a.x+a.w, b.x+b.w) - Math.max(a.x, b.x), h = Math.min(a.y+a.h, b.y+b.h) - Math.max(a.y, b.y); return w > 0 && h > 0 ? w*h / Math.min(a.w*a.h, b.w*b.h) : 0; };
+    const slotBox = c => { const ys = c.rows || [c.y]; return {x:c.x, y:Math.min(...ys), w:c.w, h:Math.max(...ys)+c.h-Math.min(...ys)}; };
+    cells.filter(c => c.w >= 30 && c.h >= 9 && c.h <= 130 && c.w <= vp.width*.95 && !hasText(c.x, c.y, c.w, c.h) && !C.some(s => overlap(c, slotBox(s)) > .3))
+      .forEach(c => C.push({kind:'box', x:c.x+1, y:c.y+1, w:c.w-2, h:c.h-2, cell:true}));
+
     // underlines to write on
     horiz.forEach(l => {
+      if (cells.some(c => (Math.abs(l.y-c.y) < 2 || Math.abs(l.y-c.y-c.h) < 2) && l.x1 > c.x+2 && l.x0 < c.x+c.w-2)) return;
       if (C.some(c => l.x0 >= c.x-2 && l.x1 <= c.x+c.w+2 && Math.abs(l.y - c.y) < 2 || Math.abs(l.y - (c.y + c.h)) < 2 && l.x0 >= c.x-2 && l.x1 <= c.x+c.w+2)) return;
       if (R.some(r => r[3] > 1.2 && (Math.abs(r[1]-l.y) < 1.2 || Math.abs(r[1]+r[3]-l.y) < 1.2) && l.x0 >= r[0]-2 && l.x1 <= r[0]+r[2]+2)) return;
       if (texts.some(t => t.y > l.y - 1 && t.y < l.y + 9 && t.x < l.x1 && t.x + t.w > l.x0 + 4)) return;
@@ -1043,7 +1075,7 @@ async function detectSlots(bytes){
     // labels
     const near = c => {
       const top = c.rows ? Math.max(...c.rows) + c.h : c.y + c.h, bot = c.y, mid = (c.rows ? Math.max(...c.rows) : c.y) + c.h/2;
-      const row = texts.filter(t => t.y + t.h*0.7 > mid - c.h*0.7 && t.y < mid + c.h*0.6);
+      const row = texts.filter(t => c.cell ? (t.y + t.h*.35 > c.y-1 && t.y + t.h*.35 < c.y+c.h+1) : (t.y + t.h*0.7 > mid - c.h*0.7 && t.y < mid + c.h*0.6));
       const left = row.filter(t => t.x + t.w <= c.x + 3 && t.x + t.w > c.x - 230).sort((a,b) => b.x - a.x).slice(0, 3).reverse().map(t => t.s).join(' ');
       const right = row.filter(t => t.x >= c.x + c.w - 2 && t.x < c.x + c.w + 70).sort((a,b) => a.x - b.x).slice(0, 2).map(t => t.s).join(' ');
       const above = texts.filter(t => t.y > top - 1 && t.y < top + 16 && t.x < c.x + c.w && t.x + t.w > c.x - 20).sort((a,b) => a.y - b.y || a.x - b.x).slice(0, 3).map(t => t.s).join(' ');
@@ -1132,7 +1164,17 @@ async function fillCustom(bytes, f, values){
     p.drawLine({start:{x:ox+s*.18,y:oy+s*.52},end:{x:ox+s*.42,y:oy+s*.2},thickness:t,color:ink}); p.drawLine({start:{x:ox+s*.42,y:oy+s*.2},end:{x:ox+s*.85,y:oy+s*.86},thickness:t,color:ink}); };
   const combRow = (p, s, x, y, w, h, n) => { const pitch = w/n, size = Math.min(10, h*.68, pitch*1.05); [...s].slice(0, n).forEach((ch, i) => { if (ch === ' ') return; const cw = font.widthOfTextAtSize(ch, size); p.drawText(ch, {x:x+i*pitch+(pitch-cw)/2, y:y+(h-size*.72)/2, size, font, color:ink}); }); };
   const wrapN = (txt, n, rows) => { const words = txt.split(' ').filter(Boolean), lines = ['']; words.forEach(w => { const cur = lines[lines.length-1], c = cur ? cur + ' ' + w : w; if (c.length <= n) lines[lines.length-1] = c; else { if (cur) lines.push(''); while (w.length > n){ lines[lines.length-1] = w.slice(0, n); w = w.slice(n); lines.push(''); } lines[lines.length-1] = w; } }); return {lines: lines.slice(0, rows), over: lines.length > rows}; };
-  const freeText = (p, s, x, y, w, h) => { let size = Math.min(10, h*.7); while (size > 5 && font.widthOfTextAtSize(s, size) > w-3) size -= .25; let t = s; let over = false; while (t && font.widthOfTextAtSize(t, size) > w-3){ t = t.slice(0, -1); over = true; } p.drawText(t, {x:x+1.5, y: y + Math.max(1.5, (h - size*.72)/2), size, font, color:ink}); return over; };
+  const freeText = (p, s, x, y, w, h) => {
+    if (h >= 22){
+      const size = 10, leading = 12.5, max = Math.max(1, Math.floor((h-3)/leading)), lines = [''];
+      s.split(' ').forEach(word => { const cur = lines[lines.length-1], c = cur ? cur + ' ' + word : word; if (font.widthOfTextAtSize(c, size) <= w-6) lines[lines.length-1] = c; else lines.push(word); });
+      const show = lines.slice(0, max), top = y + (h + show.length*leading)/2 - size;
+      if (show.every(l => font.widthOfTextAtSize(l, size) <= w-6)){
+        show.forEach((l, i) => p.drawText(l, {x:x+3, y:top - i*leading, size, font, color:ink}));
+        return lines.length > max;
+      }
+    }
+    let size = Math.min(10, h*.7); while (size > 5 && font.widthOfTextAtSize(s, size) > w-3) size -= .25; let t = s; let over = false; while (t && font.widthOfTextAtSize(t, size) > w-3){ t = t.slice(0, -1); over = true; } p.drawText(t, {x:x+1.5, y: y + Math.max(1.5, (h - size*.72)/2), size, font, color:ink}); return over; };
   for (const s of f.slots){
     if (!s.key) continue; const p = pages[s.page-1]; if (!p) continue;
     if (s.kind === 'check'){ if (optMatch(values[s.key], s.option ?? 'Yes')) tickAt(p, s.x, s.y, s.w, s.h); continue; }
@@ -1457,9 +1499,16 @@ async function onFormUpload(file){
   } catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : (e.message || String(e)); }
 }
 async function remap(){
-  const st = $('#formStatus'); st.className = 'status busy'; st.textContent = 'AI is re-mapping the form…';
-  try { const doc = await openPdf(formBytes); const det = await detectSlots(formBytes); det.slots = form.slots.map(s => Object.assign({}, s, {key:undefined, part:undefined, option:undefined})); void doc;
-    const m = await mapForm(det, form.name); form.fields = m.fields; form.slots = det.slots; saveFormSoon(); drawSlots(); st.className = 'status'; st.textContent = 'Re-mapped.'; }
+  const st = $('#formStatus'); st.className = 'status busy'; st.textContent = 'Finding the boxes again…';
+  try {
+    const det = await detectSlots(formBytes);
+    if (det.slots.length < 3) det.slots = form.slots.map(s => Object.assign({}, s, {key:undefined, part:undefined, option:undefined}));
+    st.textContent = `Found ${det.slots.length} boxes. AI is working out what goes in each…`;
+    const m = await mapForm(det, baseName(form));
+    form.fields = m.fields; form.slots = det.slots; selSlot = null; $('#insp').hidden = true;
+    saveFormSoon(); drawSlots();
+    st.className = 'status'; st.textContent = `Re-mapped: ${form.slots.filter(s => s.key).length} of ${form.slots.length} boxes used. Check the layout on the right.`;
+  }
   catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : e.message; }
 }
 
