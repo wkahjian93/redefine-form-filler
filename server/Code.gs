@@ -1,13 +1,13 @@
 /* REDEFINE Form Filler team server (Google Apps Script).
-   Holds the Claude API key, checks the team code, and keeps the shared blank forms in a Drive folder.
-   Customer details pass through to Claude and are never written to Drive or logged.
+   Holds the OpenAI API key, checks the team code, and keeps the shared blank forms in a Drive folder.
+   Customer details pass through to OpenAI and are never written to Drive or logged.
 
    Script properties (Project Settings > Script properties):
-     ANTHROPIC_API_KEY  required
+     OPENAI_API_KEY     required
      TEAM_CODE          required, the code agents sign in with
      OWNER_CODE         required, your own code; it can remove any form
-     DAILY_LIMIT        optional, Claude calls per day for the team (default 300)
-     MODEL              optional (default claude-opus-5-5)
+     DAILY_LIMIT        optional, AI calls per day for the team (default 300)
+     MODEL              optional (default gpt-6.1-terra)
 */
 var COLLECTIONS = ['teamforms', 'teamformfiles'];
 var FOLDER_NAME = 'REDEFINE Form Filler Data';
@@ -44,7 +44,7 @@ function handle(q) {
   var role = roleOf(String(q.code || ''));
   switch (q.op) {
     case 'login': return {ok: true, owner: role === 'owner'};
-    case 'ai': return askClaude(q);
+    case 'ai': return askAI(q);
     case 'ver': return {ver: prop('ver') || '0'};
     case 'list': return {docs: listDocs(checkColl(q.coll))};
     case 'get': return {doc: getDoc(checkColl(q.coll), checkId(q.id))};
@@ -57,7 +57,7 @@ function handle(q) {
 function checkColl(c) { if (COLLECTIONS.indexOf(c) < 0) fail('invalid_request'); return c; }
 function checkId(i) { if (!/^[\w.-]{1,120}$/.test(String(i))) fail('invalid_request'); return String(i); }
 
-/* ---------- Claude ---------- */
+/* ---------- OpenAI ---------- */
 function underDailyLimit() {
   var lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
@@ -68,35 +68,44 @@ function underDailyLimit() {
   } finally { lock.releaseLock(); }
 }
 
-function askClaude(q) {
-  var key = prop('ANTHROPIC_API_KEY'); if (!key) fail('no_api_key');
+function askAI(q) {
+  var key = prop('OPENAI_API_KEY'); if (!key) fail('no_api_key');
   underDailyLimit();
   var prompt = String(q.prompt || ''); if (!prompt) fail('invalid_request');
-  var content = (q.images || []).slice(0, 5).map(function (b64) {
-    return {type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: b64}};
+  var content = [{type: 'input_text', text: prompt}];
+  (q.images || []).slice(0, 5).forEach(function (b64) {
+    content.push({type: 'input_image', image_url: 'data:image/jpeg;base64,' + b64, detail: 'high'});
   });
-  content.push({type: 'text', text: prompt});
-  var res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+  var res = UrlFetchApp.fetch('https://api.openai.com/v1/responses', {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: {'x-api-key': key, 'anthropic-version': '2026-10-21', 'anthropic-beta': 'server-side-fallback-2026-07-01'},
+    headers: {Authorization: 'Bearer ' + key},
     payload: JSON.stringify({
-      model: prop('MODEL') || 'claude-opus-5-5',
-      max_tokens: prompt.length > 30000 ? 32000 : 16000,
-      output_config: {effort: 'medium'},
-      fallbacks: 'default',
-      messages: [{role: 'user', content: content}]
+      model: prop('MODEL') || 'gpt-6.1-terra',
+      store: false,
+      max_output_tokens: prompt.length > 30000 ? 32000 : 16000,
+      reasoning: {effort: 'medium'},
+      text: {format: {type: 'json_object'}},
+      input: [{role: 'user', content: content}]
     })
   });
   var status = res.getResponseCode();
-  if (status === 401 || status === 403) fail('bad_api_key');
-  if (status === 429 || status === 529) fail('rate_limited');
+  if (status === 401) fail('bad_api_key');
+  if (status === 404 || status === 403) fail('bad_model');
+  if (status === 429) fail(/insufficient_quota/.test(res.getContentText()) ? 'no_credit' : 'rate_limited');
   if (status === 413) fail('prompt_too_large');
-  if (status !== 200) { console.error('claude status ' + status); fail('upstream_error'); }
-  var msg = JSON.parse(res.getContentText());
-  if (msg.stop_reason === 'refusal') fail('refused');
-  var text = (msg.content || []).filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
+  if (status !== 200) { console.error('openai status ' + status); fail('upstream_error'); }
+  var msg = JSON.parse(res.getContentText()), text = '';
+  (msg.output || []).forEach(function (item) {
+    if (item.type !== 'message') return;
+    (item.content || []).forEach(function (c) {
+      if (c.type === 'refusal') fail('refused');
+      if (c.type === 'output_text') text += c.text;
+    });
+  });
+  var why = msg.incomplete_details && msg.incomplete_details.reason;
+  if (why === 'content_filter') fail('refused');
   if (!text) fail('empty_completion');
-  return {text: text, truncated: msg.stop_reason === 'max_tokens'};
+  return {text: text, truncated: msg.status === 'incomplete'};
 }
 
 /* ---------- shared blank forms, one Drive file per document ---------- */
@@ -136,4 +145,4 @@ function delDoc(coll, id, role, name) {
 }
 
 /* Run once from the editor to approve Drive and external-request access. */
-function setup() { folder(); UrlFetchApp.fetch('https://api.anthropic.com', {muteHttpExceptions: true}); console.log('Ready'); }
+function setup() { folder(); UrlFetchApp.fetch('https://api.openai.com/v1/models', {muteHttpExceptions: true}); console.log('Ready'); }

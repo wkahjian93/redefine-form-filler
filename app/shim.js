@@ -49,7 +49,7 @@
     return ready;
   }
 
-  /* Claude */
+  /* AI, through the team server */
   async function toJpegB64(blob) {
     const bmp = await createImageBitmap(blob), k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);

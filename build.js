@@ -7,12 +7,15 @@ let page = fs.readFileSync(here('app', 'app.html'), 'utf8');
 const shim = fs.readFileSync(here('app', 'shim.js'), 'utf8');
 
 const swap = (a, b) => { if (!page.includes(a)) throw new Error('Missing text: ' + a); page = page.split(a).join(b); };
-swap('Client data goes to Claude on your own account.', 'Client details go through the REDEFINE team server to Claude and are not saved there.');
+swap('Client data goes to Claude on your own account.', 'Client details go through the REDEFINE team server to OpenAI. REDEFINE does not save them.');
 swap('Claude isn’t available in this view'.replace('’', "'"), 'The team server is not connected yet');
 swap('Open this app on claude.ai while signed in. ', '');
 swap('Team forms appear when you open this app on claude.ai while signed in.', 'Team forms appear once the team server is connected.');
-const AI_ERRORS = `const AI_EXTRA = {daily_limit:'The team has reached today’s Claude limit. Try again tomorrow, or ask the app owner to raise it.', bad_api_key:'The team server’s Claude key isn’t working. Tell the app owner.', no_api_key:'The team server has no Claude key yet. Tell the app owner.', locked:'Too many wrong codes. Wait 15 minutes.'}; Object.assign(AI_COPY, AI_EXTRA);`;
+const AI_ERRORS = `const AI_EXTRA = {daily_limit:'The team has reached today’s AI limit. Try again tomorrow, or ask the app owner to raise it.', bad_api_key:'The team server’s OpenAI key isn’t working. Tell the app owner.', no_api_key:'The team server has no OpenAI key yet. Tell the app owner.', no_credit:'The OpenAI account is out of credit. Tell the app owner.', bad_model:'The OpenAI account can’t use this AI model. Tell the app owner.', locked:'Too many wrong codes. Wait 15 minutes.'}; Object.assign(AI_COPY, AI_EXTRA);`;
 swap('async function askJSON(prompt, opts)', AI_ERRORS + '\nasync function askJSON(prompt, opts)');
+
+// the claude.ai version keeps its wording; this build runs on OpenAI
+page = page.split('Claude').join('AI');
 
 const head = `<!doctype html>
 <html lang="en"><head>

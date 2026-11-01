@@ -1134,7 +1134,7 @@ async function runExtraction(){
       if (!list.length) j.srcs.forEach(s => s.result = 'no customer details found');
     } catch(e){
       failed++; if (e.code !== 'empty') lastError = aiMsg(e); j.srcs.forEach(s => { s.status = 'failed'; s.error = e.code === 'empty' ? 'Nothing readable in this file.' : aiMsg(e); });
-      if (['cancelled','not_granted','sampling_disabled','rate_limited','daily_limit','bad_api_key','no_api_key'].includes(e.code)){ renderSources(); break; }
+      if (['cancelled','not_granted','sampling_disabled','rate_limited','daily_limit','bad_api_key','no_api_key','no_credit','bad_model'].includes(e.code)){ renderSources(); break; }
     }
     renderSources();
   }

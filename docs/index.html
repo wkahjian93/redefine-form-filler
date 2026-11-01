@@ -64,7 +64,7 @@
     return ready;
   }
 
-  /* Claude */
+  /* AI, through the team server */
   async function toJpegB64(blob) {
     const bmp = await createImageBitmap(blob), k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
@@ -331,7 +331,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
   <header class="mast">
     <div class="brand">
       <div class="logobar"><img class="mark" src="data:image/png;base64,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" alt=""><img class="word" src="data:image/png;base64,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" alt="REDEFINE"></div>
-      <h1>Form Filler<small>Upload a blank form and customer files. Claude reads them and fills the boxes.</small></h1>
+      <h1>Form Filler<small>Upload a blank form and customer files. AI reads them and fills the boxes.</small></h1>
     </div>
     <nav class="steps" aria-label="Steps">
       <button class="step" id="st1" data-p="1" aria-current="step"><b>1</b>Blank form</button>
@@ -351,7 +351,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
       <div>
         <div class="eyebrow">Step 1</div>
         <h2>Choose a team form or add a new one</h2>
-        <p class="lede">Pick a form your team already uses, or upload a new blank PDF or photo. For a new form, the app finds every box and Claude works out what goes in each one. Once it's filled and exported, it's saved here for every agent.</p>
+        <p class="lede">Pick a form your team already uses, or upload a new blank PDF or photo. For a new form, the app finds every box and AI works out what goes in each one. Once it's filled and exported, it's saved here for every agent.</p>
         <label class="drop" id="formDrop" tabindex="0" for="formFile"><strong>Upload a blank form</strong><span>Blank forms only: the whole team can see what you upload. PDF gives exact box positions. Photos work with approximate positions.</span></label>
         <input type="file" id="formFile" accept=".pdf,image/*" hidden>
         <div class="status" id="formStatus" style="margin-top:10px"></div>
@@ -363,7 +363,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
           <h3 id="mapTitle">Form layout</h3>
           <div class="row" id="mapTools" hidden>
             <button class="btn sm" id="btnAddSlot">＋ Add text box</button>
-            <button class="btn sm" id="btnRemap">Re-map with Claude</button>
+            <button class="btn sm" id="btnRemap">Re-map with AI</button>
           </div>
         </div>
         <div class="legend" id="mapLegend" hidden><span><i></i>Mapped to a field</span><span><i class="un"></i>Not used</span><span>Drag a box to move it. Click it to edit.</span></div>
@@ -391,13 +391,13 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
         <ul class="srcs" id="srcList"></ul>
       </div>
       <div class="card">
-        <h3>Read with Claude</h3>
-        <p class="note" style="margin:6px 0 12px">Claude reads each file and fills the fields of the form you picked in step 1. Nothing is guessed: details that aren't in the files are left blank and listed for you to check. Client details go through the REDEFINE team server to Claude and are not saved there. Remove details the form doesn't need, such as medical records, before uploading.</p>
+        <h3>Read with AI</h3>
+        <p class="note" style="margin:6px 0 12px">AI reads each file and fills the fields of the form you picked in step 1. Nothing is guessed: details that aren't in the files are left blank and listed for you to check. Client details go through the REDEFINE team server to OpenAI. REDEFINE does not save them. Remove details the form doesn't need, such as medical records, before uploading.</p>
         <div class="row"><button class="btn primary" id="btnExtract">Read files &amp; fill</button><button class="btn" id="btnStop" hidden>Stop</button><button class="btn ghost" id="btnClearSrc">Clear files</button></div>
         <div class="status" id="exStatus" style="margin-top:10px"></div>
         <div style="margin-top:14px;border-top:1px solid var(--rule-2);padding-top:12px">
           <div class="row" style="justify-content:space-between"><b>No AI? Use the Excel template</b><button class="btn sm" id="btnTpl">Download template</button></div>
-          <p class="note">Columns named like the template are filled directly, without Claude.</p>
+          <p class="note">Columns named like the template are filled directly, without AI.</p>
         </div>
       </div>
     </div>
@@ -795,7 +795,7 @@ const b64ToBytes = b => Uint8Array.from(atob(b), c => c.charCodeAt(0));
 const PRESET_BYTES = b64ToBytes(TEMPLATE_B64);
 let agent = Object.assign({name:'', iac:'', today:false}, LS.get('faf.agent', {}));
 
-/* ======================= Claude ======================= */
+/* ======================= AI ======================= */
 let aiFn;
 async function ai(){
   if (aiFn !== undefined) return aiFn;
@@ -803,9 +803,9 @@ async function ai(){
   $('#aiBanner').hidden = !!aiFn;
   return aiFn;
 }
-const AI_COPY = {not_granted:'Claude access was not allowed for this app. Reload the page to be asked again.', sampling_disabled:'Claude is not available for this account.', rate_limited:'Claude is busy or your usage limit was reached. Wait a moment, then try again.', session_expired:'Your claude.ai session expired. Sign in again.', prompt_too_large:'That file is too large to read in one go. Split it into smaller files.', image_rejected:'One of the images could not be read. Try a JPG or PNG.', invalid_json:'Claude replied in an unexpected format. Try again.', refused:'Claude declined to read this material.', cancelled:'Stopped.', images_unavailable:'Images cannot be sent to Claude in this view.', unavailable:'Claude is not available in this view.'};
-const aiMsg = e => AI_COPY[e && e.code] || ('Claude could not finish: ' + ((e && e.message) || 'unknown error') + '. Try again.');
-const AI_EXTRA = {daily_limit:'The team has reached today’s Claude limit. Try again tomorrow, or ask the app owner to raise it.', bad_api_key:'The team server’s Claude key isn’t working. Tell the app owner.', no_api_key:'The team server has no Claude key yet. Tell the app owner.', locked:'Too many wrong codes. Wait 15 minutes.'}; Object.assign(AI_COPY, AI_EXTRA);
+const AI_COPY = {not_granted:'AI access was not allowed for this app. Reload the page to be asked again.', sampling_disabled:'AI is not available for this account.', rate_limited:'AI is busy or your usage limit was reached. Wait a moment, then try again.', session_expired:'Your claude.ai session expired. Sign in again.', prompt_too_large:'That file is too large to read in one go. Split it into smaller files.', image_rejected:'One of the images could not be read. Try a JPG or PNG.', invalid_json:'AI replied in an unexpected format. Try again.', refused:'AI declined to read this material.', cancelled:'Stopped.', images_unavailable:'Images cannot be sent to AI in this view.', unavailable:'AI is not available in this view.'};
+const aiMsg = e => AI_COPY[e && e.code] || ('AI could not finish: ' + ((e && e.message) || 'unknown error') + '. Try again.');
+const AI_EXTRA = {daily_limit:'The team has reached today’s AI limit. Try again tomorrow, or ask the app owner to raise it.', bad_api_key:'The team server’s OpenAI key isn’t working. Tell the app owner.', no_api_key:'The team server has no OpenAI key yet. Tell the app owner.', no_credit:'The OpenAI account is out of credit. Tell the app owner.', bad_model:'The OpenAI account can’t use this AI model. Tell the app owner.', locked:'Too many wrong codes. Wait 15 minutes.'}; Object.assign(AI_COPY, AI_EXTRA);
 async function askJSON(prompt, opts){ const s = await ai(); if (!s) throw {code:'unavailable'}; return s.json(prompt, opts || {}); }
 async function imageCap(){ const s = await ai(); if (!s) return 0; try { const l = await s.limits(); return (l.images && l.images.maxCount) || 0; } catch(e){ return 0; } }
 
@@ -1164,7 +1164,7 @@ function issuesFor(c){
   const list = [];
   if (form.kind === 'preset') list.push(...resolveRecord(c.values, {agentName:agent.name, agentIac:agent.iac, today:agent.today, derive:true, split:true}).issues);
   (c.missing || []).forEach(k => { if (!S(c.values[k])) list.push({level:'warn', msg:`Not found in the files: ${labelOf(form, k)}.`}); });
-  (c.notes || []).forEach(n => list.push({level:'info', msg:'Claude: ' + n}));
+  (c.notes || []).forEach(n => list.push({level:'info', msg:'AI: ' + n}));
   return list;
 }
 const levelOf = c => { const l = issuesFor(c); return l.some(i => i.level === 'error') ? 'err' : l.some(i => i.level === 'warn') ? 'warn' : 'ok'; };
@@ -1210,7 +1210,7 @@ async function addSourceFiles(files){
 }
 function renderSources(){
   $('#srcList').innerHTML = sources.map(s => {
-    const what = s.status === 'error' ? `<span class="st err">${esc(s.error)}</span>` : s.status === 'reading' ? '<span class="st">reading…</span>' : s.status === 'done' ? `<span class="st ok">${esc(s.result || 'done')}</span>` : s.status === 'working' ? '<span class="st">Claude is reading…</span>' : s.status === 'failed' ? `<span class="st err">${esc(s.error)}</span>` :
+    const what = s.status === 'error' ? `<span class="st err">${esc(s.error)}</span>` : s.status === 'reading' ? '<span class="st">reading…</span>' : s.status === 'done' ? `<span class="st ok">${esc(s.result || 'done')}</span>` : s.status === 'working' ? '<span class="st">AI is reading…</span>' : s.status === 'failed' ? `<span class="st err">${esc(s.error)}</span>` :
       `<span class="st">${s.sheets ? s.sheets.reduce((a, sh) => a + sh.rows.length - 1, 0) + ' rows' : s.images.length ? s.images.length + ' image' + (s.images.length > 1 ? 's' : '') + (s.text ? ' + text' : '') : (s.text || '').length + ' chars'}</span>`;
     return `<li><span class="k">${esc(s.kind)}</span><span class="n" title="${esc(s.name)}">${esc(s.name)}</span>${what}<button class="btn ghost sm" data-rm="${s.id}" aria-label="Remove ${esc(s.name)}">✕</button></li>`;
   }).join('');
@@ -1273,12 +1273,12 @@ async function runExtraction(){
   }
   renderSources();
   if (!jobs.length){ afterImport(direct); return; }
-  if (!(await ai())){ toast('Claude is not available here. Only template-formatted spreadsheets can be imported.'); afterImport(direct); return; }
-  if (jobs.some(j => j.images.length) && !maxImg){ toast('Images can’t be sent to Claude in this view; image files are skipped.'); }
+  if (!(await ai())){ toast('AI is not available here. Only template-formatted spreadsheets can be imported.'); afterImport(direct); return; }
+  if (jobs.some(j => j.images.length) && !maxImg){ toast('Images can’t be sent to AI in this view; image files are skipped.'); }
   $('#btnExtract').disabled = true; $('#btnStop').hidden = false; let added = 0, failed = 0, lastError = '';
   for (let k = 0; k < jobs.length; k++){
     const j = jobs[k]; j.srcs.forEach(s => s.status = 'working'); renderSources();
-    $('#exStatus').className = 'status busy'; $('#exStatus').textContent = `Claude is reading ${k+1} of ${jobs.length}… (first answer can take up to a minute)`;
+    $('#exStatus').className = 'status busy'; $('#exStatus').textContent = `AI is reading ${k+1} of ${jobs.length}… (first answer can take up to a minute)`;
     stopCtl = new AbortController();
     try {
       const imgs = maxImg ? j.images.slice(0, maxImg) : [];
@@ -1293,7 +1293,7 @@ async function runExtraction(){
       if (!list.length) j.srcs.forEach(s => s.result = 'no customer details found');
     } catch(e){
       failed++; if (e.code !== 'empty') lastError = aiMsg(e); j.srcs.forEach(s => { s.status = 'failed'; s.error = e.code === 'empty' ? 'Nothing readable in this file.' : aiMsg(e); });
-      if (['cancelled','not_granted','sampling_disabled','rate_limited','daily_limit','bad_api_key','no_api_key'].includes(e.code)){ renderSources(); break; }
+      if (['cancelled','not_granted','sampling_disabled','rate_limited','daily_limit','bad_api_key','no_api_key','no_credit','bad_model'].includes(e.code)){ renderSources(); break; }
     }
     renderSources();
   }
@@ -1446,10 +1446,10 @@ async function onFormUpload(file){
     st.textContent = 'Finding the boxes on each page…';
     const det = await detectSlots(bytes);
     const thin = []; for (let p = 1; p <= det.numPages; p++) if (det.slots.filter(s => s.page === p).length < 3) thin.push(p);
-    if (!(await ai())){ throw new Error('Claude is needed to understand a new form. Open this app on claude.ai.'); }
-    if (thin.length){ st.textContent = `Page ${thin.join(', ')} has no drawn boxes (a scan or photo). Asking Claude to locate the boxes by eye…`; det.slots.push(...await visionSlots(bytes, thin.slice(0, 6), det.slots.length + 1000)); }
+    if (!(await ai())){ throw new Error('AI is needed to understand a new form. Open this app on claude.ai.'); }
+    if (thin.length){ st.textContent = `Page ${thin.join(', ')} has no drawn boxes (a scan or photo). Asking AI to locate the boxes by eye…`; det.slots.push(...await visionSlots(bytes, thin.slice(0, 6), det.slots.length + 1000)); }
     if (!det.slots.length) throw new Error('No boxes or lines to write on were found in this form.');
-    st.textContent = `Found ${det.slots.length} boxes. Claude is working out what goes in each (this can take 1–2 minutes)…`;
+    st.textContent = `Found ${det.slots.length} boxes. AI is working out what goes in each (this can take 1–2 minutes)…`;
     const m = await mapForm(det, file.name.replace(/\.[^.]+$/, ''));
     const f = {id:'f-' + uid(), kind:'custom', name:m.name, fields:m.fields, slots:det.slots, bytes:bytes.buffer.slice(0), pages:det.numPages, hash, looksFilled:!!m.looksFilled};
     forms.splice(1, 0, f); await selectForm(f.id);
@@ -1457,7 +1457,7 @@ async function onFormUpload(file){
   } catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : (e.message || String(e)); }
 }
 async function remap(){
-  const st = $('#formStatus'); st.className = 'status busy'; st.textContent = 'Claude is re-mapping the form…';
+  const st = $('#formStatus'); st.className = 'status busy'; st.textContent = 'AI is re-mapping the form…';
   try { const doc = await openPdf(formBytes); const det = await detectSlots(formBytes); det.slots = form.slots.map(s => Object.assign({}, s, {key:undefined, part:undefined, option:undefined})); void doc;
     const m = await mapForm(det, form.name); form.fields = m.fields; form.slots = det.slots; saveFormSoon(); drawSlots(); st.className = 'status'; st.textContent = 'Re-mapped.'; }
   catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : e.message; }
@@ -1479,7 +1479,7 @@ function renderEditor(){
   const groups = []; form.fields.forEach(f => { let g = groups.find(x => x.name === f.group); if (!g) groups.push(g = {name:f.group, fields:[]}); g.fields.push(f); });
   const auto = form.kind === 'preset' ? resolveRecord(c.values, {agentName:agent.name, agentIac:agent.iac, today:agent.today, derive:true, split:true}).auto : {};
   box.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>${esc(displayName(c))}</b><span class="note">${c.source ? 'From: ' + esc(c.source) : ''}</span></div>
-    <p class="note" style="margin:0 0 6px">Blue fields were filled by Claude. Grey italic text is worked out automatically. Edit anything; the preview updates.</p>` +
+    <p class="note" style="margin:0 0 6px">Blue fields were filled by AI. Grey italic text is worked out automatically. Edit anything; the preview updates.</p>` +
     groups.map(g => { const n = g.fields.filter(f => S(c.values[f.key])).length; if (!n && /^(Nominee [234]|Trustee 2|Part 3)/.test(g.name) && form.kind === 'preset') return `<details class="grp"><summary>${esc(g.name)}<span class="ct">empty</span></summary><div class="fg">${g.fields.map(fieldHtml).join('')}</div></details>`;
       return `<details class="grp" ${n || g === groups[0] ? 'open' : ''}><summary>${esc(g.name)}<span class="ct">${n}/${g.fields.length}</span></summary><div class="fg">${g.fields.map(fieldHtml).join('')}</div></details>`; }).join('');
   function fieldHtml(f){ const v = S(c.values[f.key]); const id = 'fv_' + f.key; const wide = /name|address/.test(f.key) && f.type === 'text';
@@ -1492,7 +1492,7 @@ function schedulePreview(d){ clearTimeout(pvT); pvT = setTimeout(preview, d === 
 async function preview(){
   const c = cur(); if (!c || !$('#p3').classList.contains('on')) return;
   const n = ++pvN; $('#pvStatus').className = 'status busy'; $('#pvStatus').textContent = 'Filling…';
-  try { const {bytes, issues} = await fillFor(c); if (n !== pvN) return; const extra = issuesFor(c).filter(i => form.kind !== 'preset' || !/^(Not found|Claude)/.test(i.msg) ? true : true);
+  try { const {bytes, issues} = await fillFor(c); if (n !== pvN) return; const extra = issuesFor(c).filter(i => form.kind !== 'preset' || !/^(Not found|AI)/.test(i.msg) ? true : true);
     const seen = new Set(); showIssues([...(form.kind === 'preset' ? issues : issues), ...extra].filter(i => !seen.has(i.msg) && seen.add(i.msg)));
     await renderPages(bytes, $('#pvPages'), {maxPages: 8}); if (n === pvN){ $('#pvStatus').className = 'status'; $('#pvStatus').textContent = ''; } }
   catch(e){ console.error(e); $('#pvStatus').className = 'status'; $('#pvStatus').textContent = 'Could not fill: ' + e.message; }
