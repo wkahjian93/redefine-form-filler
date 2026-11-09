@@ -248,11 +248,12 @@ function ioHas(q, k) {
   return new RegExp('(^|[^a-z0-9])' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(q);
 }
 function ioCount(text, w) { var c = 0, i = text.indexOf(w); while (i >= 0 && c < 20) { c++; i = text.indexOf(w, i + w.length); } return c; }
-function ioSearch(question, lib, max) {
+function ioSearch(question, lib, max, main) {
   var terms = ioTerms(question, lib.syn), N = lib.chunks.length;
   if (!terms.length) return [];
+  var mainTerms = main ? ioTerms(main, lib.syn) : terms;   // words of the newest question count double
   var low = lib.chunks.map(function (c) { return (c.h + ' \n' + c.x).toLowerCase(); });
-  var idf = terms.map(function (w) { var df = 0; for (var i = 0; i < N; i++) if (low[i].indexOf(w) >= 0) df++; return df ? Math.log(N / df) : 0; });
+  var idf = terms.map(function (w) { var df = 0; for (var i = 0; i < N; i++) if (low[i].indexOf(w) >= 0) df++; return df ? Math.log(N / df) * (mainTerms.indexOf(w) >= 0 ? 2 : 1) : 0; });
   var scored = [];
   for (var i = 0; i < N; i++) {
     var s = 0, hit = 0, head = lib.chunks[i].h.toLowerCase();
@@ -274,8 +275,16 @@ function ioSearch(question, lib, max) {
   }
   return out;
 }
-function ioPrompt(question, found, catalog) {
+/* chat history from the phone: [{q, a}] oldest first, last 4 turns, trimmed; never trusted as a source */
+function ioHistory(h) {
+  if (!Array.isArray(h)) return [];
+  return h.slice(-4).map(function (t) {
+    return {q: String((t && t.q) || '').slice(0, 600), a: String((t && t.a) || '').slice(0, 1500)};
+  }).filter(function (t) { return t.q; });
+}
+function ioPrompt(question, found, catalog, history) {
   var src = found.map(function (c, i) { return '[' + (i + 1) + '] ' + c.s + ' | ' + c.h + '\n' + c.x; }).join('\n\n---\n\n');
+  var chat = (history || []).map(function (t) { return 'Agent: ' + t.q + '\nYou answered: ' + (t.a || '(a step-by-step guide)'); }).join('\n\n');
   return [
     'You are "No Need Ask IO", the helper that answers Great Eastern Life Malaysia agents\' questions about the ePartner agent portal, GE procedures, forms and products, for the REDEFINE agency.',
     'RULES:',
@@ -288,15 +297,20 @@ function ioPrompt(question, found, catalog) {
     '7. If unsure or the sources conflict, say so, set confidence "low", and suggest ICM (Home → Quick Links → Mailbox) or Agent Careline 03-4259 8111.',
     'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
     '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
+    '8. This may be a follow-up in a chat. Use the CONVERSATION SO FAR only to understand what the agent means (e.g. "that form", "how about SRM", "那个呢"). Facts must still come from the SOURCES, never from earlier answers alone. If the follow-up changes topic, just answer the new question.',
     '', 'SOURCES:', src || '(none found)',
+    chat ? '\nCONVERSATION SO FAR (oldest first):\n' + chat : '',
     '', 'AGENT QUESTION: ' + question
   ].join('\n');
 }
 function ioAsk(q) {
   var question = String(q.question || '').trim();
   if (!question || question.length > 600) fail('invalid_request');
-  var lib = ioLibrary(), found = ioSearch(question, lib, 10);
-  var r = askAI({prompt: ioPrompt(question, found, lib.catalog)});
+  var history = ioHistory(q.history), lib = ioLibrary();
+  // search with the new question first, then the earlier questions, so short follow-ups still find the right documents
+  var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).join(' ');
+  var found = ioSearch(searchText, lib, 10, question);
+  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history)});
   return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
 
