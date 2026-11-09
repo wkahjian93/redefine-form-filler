@@ -50,6 +50,8 @@ function handle(q) {
     case 'get': return {doc: getDoc(checkColl(q.coll), checkId(q.id))};
     case 'set': setDoc(checkColl(q.coll), checkId(q.id), q.data); return {ok: true};
     case 'del': delDoc(checkColl(q.coll), checkId(q.id), role, String(q.name || '')); return {ok: true};
+    case 'psget': return {items: vaultRead(checkVault(q.vault))};
+    case 'psput': return {items: vaultMerge(checkVault(q.vault), q.items)};
   }
   fail('invalid_request');
 }
@@ -142,6 +144,32 @@ function delDoc(coll, id, role, name) {
   }
   f.setTrashed(true);
   if (coll === 'teamforms') bump();
+}
+
+/* ---------- Policy Summary Power Tools: device sync ----------
+   Each agent's clients are encrypted on their own device with their personal sync passphrase.
+   The server only ever sees the vault id (derived from the passphrase) and scrambled data; it cannot read clients.
+   One Drive file per agent vault: pspt__<vault>.json = {caseId: {u: updated, d: deleted?, iv, ct}} */
+function checkVault(v) { if (!/^[0-9a-f]{64}$/.test(String(v))) fail('invalid_request'); return String(v); }
+function vaultFile(v) { var it = folder().getFilesByName('pspt__' + v + '.json'); return it.hasNext() ? it.next() : null; }
+function vaultRead(v) { var f = vaultFile(v); return f ? JSON.parse(f.getBlob().getDataAsString()) : {}; }
+function vaultMerge(v, items) {
+  if (!items || typeof items !== 'object') fail('invalid_request');
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var cur = vaultRead(v), n = 0;
+    Object.keys(items).forEach(function (id) {
+      if (!/^[\w-]{1,40}$/.test(id) || ++n > 500) fail('invalid_request');
+      var it = items[id];
+      if (!it || typeof it.u !== 'string' || (!it.d && (typeof it.ct !== 'string' || typeof it.iv !== 'string'))) fail('invalid_request');
+      if (!cur[id] || cur[id].u < it.u) cur[id] = it.d ? {u: it.u, d: true} : {u: it.u, iv: it.iv, ct: it.ct};
+    });
+    var text = JSON.stringify(cur);
+    if (text.length > 20000000) fail('vault_full');
+    var f = vaultFile(v);
+    if (f) f.setContent(text); else folder().createFile('pspt__' + v + '.json', text, MimeType.PLAIN_TEXT);
+    return cur;
+  } finally { lock.releaseLock(); }
 }
 
 /* Run once from the editor to approve Drive and external-request access. */
