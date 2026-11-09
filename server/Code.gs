@@ -75,12 +75,12 @@ function underDailyLimit() {
   } finally { lock.releaseLock(); }
 }
 
-function askAI(q) {
+function askAI(q, maxImages) {
   var key = prop('OPENAI_API_KEY'); if (!key) fail('no_api_key');
   underDailyLimit();
   var prompt = String(q.prompt || ''); if (!prompt) fail('invalid_request');
   var content = [{type: 'input_text', text: prompt}];
-  (q.images || []).slice(0, 5).forEach(function (b64) {
+  (q.images || []).slice(0, maxImages || 5).forEach(function (b64) {
     content.push({type: 'input_image', image_url: 'data:image/jpeg;base64,' + b64, detail: 'high'});
   });
   var res = UrlFetchApp.fetch('https://api.openai.com/v1/responses', {
@@ -282,7 +282,16 @@ function ioHistory(h) {
     return {q: String((t && t.q) || '').slice(0, 600), a: String((t && t.a) || '').slice(0, 1500)};
   }).filter(function (t) { return t.q; });
 }
-function ioPrompt(question, found, catalog, history) {
+/* photos / PDF pages (JPEG base64) and PDF text the agent attached; used for this one answer, never stored */
+var IO_MAX_IMAGES = 8;
+function ioAttachments(q) {
+  var images = q.images == null ? [] : q.images;
+  if (!Array.isArray(images) || images.length > IO_MAX_IMAGES) fail('invalid_request');
+  images.forEach(function (b) { if (typeof b !== 'string' || b.length > 3000000 || !/^[A-Za-z0-9+\/]+=*$/.test(b.slice(0, 200))) fail('invalid_request'); });
+  return {images: images, doc: String(q.doc || '').slice(0, 40000)};
+}
+function ioPrompt(question, found, catalog, history, att) {
+  att = att || {images: [], doc: ''};
   var src = found.map(function (c, i) { return '[' + (i + 1) + '] ' + c.s + ' | ' + c.h + '\n' + c.x; }).join('\n\n---\n\n');
   var chat = (history || []).map(function (t) { return 'Agent: ' + t.q + '\nYou answered: ' + (t.a || '(a step-by-step guide)'); }).join('\n\n');
   return [
@@ -298,7 +307,9 @@ function ioPrompt(question, found, catalog, history) {
     'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
     '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
     '8. This may be a follow-up in a chat. Use the CONVERSATION SO FAR only to understand what the agent means (e.g. "that form", "how about SRM", "那个呢"). Facts must still come from the SOURCES, never from earlier answers alone. If the follow-up changes topic, just answer the new question.',
+    att.images.length || att.doc ? '9. ATTACHMENTS: the agent attached ' + (att.images.length ? att.images.length + ' image(s) (photos, screenshots or PDF pages, after this text)' : '') + (att.images.length && att.doc ? ' and ' : '') + (att.doc ? 'text from a PDF (below)' : '') + '. Read them for the details of this case (product, plan code, status, error message, dates, amounts, which form) and answer about THIS document. Rules and procedures must still come from the SOURCES. Never repeat names, IC, addresses, phone, policy or account numbers from the attachments: say "the policyholder" or "this policy". If an attachment is unreadable, say which one and ask for a clearer photo.' : '',
     '', 'SOURCES:', src || '(none found)',
+    att.doc ? '\nATTACHED PDF TEXT (from the agent, not a GE source):\n' + att.doc : '',
     chat ? '\nCONVERSATION SO FAR (oldest first):\n' + chat : '',
     '', 'AGENT QUESTION: ' + question
   ].join('\n');
@@ -306,11 +317,11 @@ function ioPrompt(question, found, catalog, history) {
 function ioAsk(q) {
   var question = String(q.question || '').trim();
   if (!question || question.length > 600) fail('invalid_request');
-  var history = ioHistory(q.history), lib = ioLibrary();
-  // search with the new question first, then the earlier questions, so short follow-ups still find the right documents
-  var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).join(' ');
+  var history = ioHistory(q.history), att = ioAttachments(q), lib = ioLibrary();
+  // search with the new question first, then the earlier questions (and the start of an attached PDF), so short follow-ups still find the right documents
+  var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).concat(att.doc ? [att.doc.slice(0, 600)] : []).join(' ');
   var found = ioSearch(searchText, lib, 10, question);
-  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history)});
+  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att), images: att.images}, IO_MAX_IMAGES);
   return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
 
