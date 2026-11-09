@@ -52,6 +52,8 @@ function handle(q) {
     case 'del': delDoc(checkColl(q.coll), checkId(q.id), role, String(q.name || '')); return {ok: true};
     case 'psget': return {items: vaultRead(checkVault(q.vault))};
     case 'psput': return {items: vaultMerge(checkVault(q.vault), q.items)};
+    case 'kbget': return kbGet(String(q.have || ''));
+    case 'kbput': if (role !== 'owner') fail('not_allowed'); return kbPut(q.text);
   }
   fail('invalid_request');
 }
@@ -170,6 +172,28 @@ function vaultMerge(v, items) {
     if (f) f.setContent(text); else folder().createFile('pspt__' + v + '.json', text, MimeType.PLAIN_TEXT);
     return cur;
   } finally { lock.releaseLock(); }
+}
+
+/* ---------- What-If Fund Projector: GE ILP rate tables ----------
+   GE internal agency material. Kept as one file in the (private) Drive folder; only signed-in agents can read it,
+   only the owner code can replace it. "have" lets a phone skip the download when it already has this version. */
+var KB_FILE = 'ge_ilp_knowledge.json';
+function kbFile() { var it = folder().getFilesByName(KB_FILE); return it.hasNext() ? it.next() : null; }
+function kbGet(have) {
+  var f = kbFile(); if (!f) fail('no_kb');
+  var ver = prop('kbver') || '1';
+  if (have && have === ver) return {same: true, ver: ver};
+  return {ver: ver, text: f.getBlob().getDataAsString()};
+}
+function kbPut(text) {
+  text = String(text || '');
+  if (text.length < 1000 || text.length > 5000000) fail('invalid_request');
+  var k; try { k = JSON.parse(text); } catch (e) { fail('invalid_request'); }
+  if (!k || !k.coi_tables || !k.products || !k.medical_riders || !k.other_riders) fail('invalid_request');
+  var f = kbFile();
+  if (f) f.setContent(text); else folder().createFile(KB_FILE, text, MimeType.PLAIN_TEXT);
+  var ver = String(Date.now()); setProp('kbver', ver);
+  return {ok: true, ver: ver};
 }
 
 /* Run once from the editor to approve Drive and external-request access. */
