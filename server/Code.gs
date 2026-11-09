@@ -54,6 +54,9 @@ function handle(q) {
     case 'psput': return {items: vaultMerge(checkVault(q.vault), q.items)};
     case 'kbget': return kbGet(String(q.have || ''));
     case 'kbput': if (role !== 'owner') fail('not_allowed'); return kbPut(q.text);
+    case 'iopack': return ioPackGet(String(q.have || ''));
+    case 'ioput': if (role !== 'owner') fail('not_allowed'); return ioPut(String(q.name || ''), q.text);
+    case 'ioask': return ioAsk(q);
   }
   fail('invalid_request');
 }
@@ -194,6 +197,107 @@ function kbPut(text) {
   if (f) f.setContent(text); else folder().createFile(KB_FILE, text, MimeType.PLAIN_TEXT);
   var ver = String(Date.now()); setProp('kbver', ver);
   return {ok: true, ver: ver};
+}
+
+/* ---------- No Need Ask IO: ePartner guides + AI answers ----------
+   nnaio_pack.json   = guides + screenshots, downloaded by signed-in phones ("have" skips repeat downloads).
+   nnaio_lib_N.json  = ePartner text library (internal PDFs); never leaves the server, only searched here.
+   Both are uploaded by the owner code from the app. Questions are not stored. */
+function ioFile(name) { var it = folder().getFilesByName(name); return it.hasNext() ? it.next() : null; }
+function ioPackGet(have) {
+  var f = ioFile('nnaio_pack.json'); if (!f) fail('no_pack');
+  var ver = prop('iover') || '1';
+  if (have && have === ver) return {same: true, ver: ver};
+  return {ver: ver, text: f.getBlob().getDataAsString()};
+}
+function ioPut(name, text) {
+  text = String(text || '');
+  var m = /^(pack|lib([1-9]))$/.exec(name); if (!m) fail('invalid_request');
+  if (text.length < 100 || text.length > 6000000) fail('invalid_request');
+  var k; try { k = JSON.parse(text); } catch (e) { fail('invalid_request'); }
+  if (m[1] === 'pack' ? (!k || k.app !== 'nnaio' || !k.guides) : (!k || k.app !== 'nnaio-lib' || !k.chunks || k.part !== +m[2])) fail('invalid_request');
+  var file = m[1] === 'pack' ? 'nnaio_pack.json' : 'nnaio_lib_' + m[2] + '.json', f = ioFile(file);
+  if (f) f.setContent(text); else folder().createFile(file, text, MimeType.PLAIN_TEXT);
+  if (m[1] === 'pack') setProp('iover', String(k.ver || Date.now()));
+  else for (var n = k.of + 1; n <= 9; n++) { var old = ioFile('nnaio_lib_' + n + '.json'); if (old) old.setTrashed(true); } // drop parts from an older, longer upload
+  return {ok: true, name: name, ver: k.ver};
+}
+function ioLibrary() {
+  var all = [], first = null;
+  for (var n = 1; n <= 9; n++) {
+    var f = ioFile('nnaio_lib_' + n + '.json'); if (!f) break;
+    var k = JSON.parse(f.getBlob().getDataAsString());
+    if (n === 1) first = k;
+    all = all.concat(k.chunks);
+  }
+  if (!first) fail('no_pack');
+  return {chunks: all, catalog: first.catalog || [], syn: first.syn || {}};
+}
+/* plain keyword search: question words (plus Chinese/Malay synonyms) weighted by how rare they are */
+var IO_STOP = ' a an the to of in on for and or is are do does how what where when can i my me we you it this that with from be at by as please check find get need want ask nak saya macam mana boleh ';
+function ioTerms(question, syn) {
+  var q = String(question).toLowerCase(), extra = [];
+  Object.keys(syn).forEach(function (k) { if (syn[k] && ioHas(q, k.toLowerCase())) extra.push(syn[k]); });
+  var words = (q + ' ' + extra.join(' ')).replace(/[^a-z0-9&\-\/\s]/g, ' ').split(/\s+/), seen = {}, out = [];
+  words.forEach(function (w) { w = w.replace(/^[-\/]+|[-\/]+$/g, ''); if (w.length < 2 || IO_STOP.indexOf(' ' + w + ' ') >= 0 || seen[w]) return; seen[w] = 1; out.push(w); });
+  return out.slice(0, 14);
+}
+/* Chinese keys match anywhere; English/Malay keys only as whole words ("sig" must not match "signature") */
+function ioHas(q, k) {
+  if (/[^\x00-\x7f]/.test(k)) return q.indexOf(k) >= 0;
+  return new RegExp('(^|[^a-z0-9])' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(q);
+}
+function ioCount(text, w) { var c = 0, i = text.indexOf(w); while (i >= 0 && c < 20) { c++; i = text.indexOf(w, i + w.length); } return c; }
+function ioSearch(question, lib, max) {
+  var terms = ioTerms(question, lib.syn), N = lib.chunks.length;
+  if (!terms.length) return [];
+  var low = lib.chunks.map(function (c) { return (c.h + ' \n' + c.x).toLowerCase(); });
+  var idf = terms.map(function (w) { var df = 0; for (var i = 0; i < N; i++) if (low[i].indexOf(w) >= 0) df++; return df ? Math.log(N / df) : 0; });
+  var scored = [];
+  for (var i = 0; i < N; i++) {
+    var s = 0, hit = 0, head = lib.chunks[i].h.toLowerCase();
+    for (var t = 0; t < terms.length; t++) {
+      if (!idf[t]) continue;
+      var c = ioCount(low[i], terms[t]); if (!c) continue;
+      hit++; s += idf[t] * (1 + Math.log(c)) * (head.indexOf(terms[t]) >= 0 ? 1.6 : 1);
+    }
+    if (!s) continue;
+    s *= (0.4 + hit / terms.length);                       // reward chunks matching more of the question
+    if (/^Study Pack/.test(lib.chunks[i].s)) s *= 1.7;     // curated answers first
+    scored.push([s, i]);
+  }
+  scored.sort(function (a, b) { return b[0] - a[0]; });
+  var out = [], size = 0;
+  for (var j = 0; j < scored.length && out.length < (max || 10); j++) {
+    var ch = lib.chunks[scored[j][1]]; if (size + ch.x.length > 22000) continue;
+    out.push(ch); size += ch.x.length;
+  }
+  return out;
+}
+function ioPrompt(question, found, catalog) {
+  var src = found.map(function (c, i) { return '[' + (i + 1) + '] ' + c.s + ' | ' + c.h + '\n' + c.x; }).join('\n\n---\n\n');
+  return [
+    'You are "No Need Ask IO", the helper that answers Great Eastern Life Malaysia agents\' questions about the ePartner agent portal, GE procedures, forms and products, for the REDEFINE agency.',
+    'RULES:',
+    '1. Use ONLY the SOURCES below. Never invent menu paths, form codes, phone numbers, product features, premiums, dates or rules. If the sources do not answer the question, set "kind" to "not_covered" and say so plainly.',
+    '2. Teach the agent to find it themselves: give short numbered steps with the exact ePartner tap path (e.g. ["Applications","List of Applications","Income","Disbursement Amount"]).',
+    '3. If one of the GUIDES matches, put its id in "guide" (the app then shows screenshots). Otherwise null.',
+    '4. Reply in the same language as the question (English, Chinese or Malay; Malaysian mixed language is fine). Keep ePartner menu names in English exactly as written in the sources.',
+    '5. For anything about a specific client (their premium, underwriting decision, claim outcome), explain where the agent checks it, never guess the result. Never repeat personal data.',
+    '6. Product or rule details: quote the document name and date from the source, and remind them to confirm with the latest PDF on ePartner. Do not give personalised financial advice.',
+    '7. If unsure or the sources conflict, say so, set confidence "low", and suggest ICM (Home → Quick Links → Mailbox) or Agent Careline 03-4259 8111.',
+    'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
+    '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
+    '', 'SOURCES:', src || '(none found)',
+    '', 'AGENT QUESTION: ' + question
+  ].join('\n');
+}
+function ioAsk(q) {
+  var question = String(q.question || '').trim();
+  if (!question || question.length > 600) fail('invalid_request');
+  var lib = ioLibrary(), found = ioSearch(question, lib, 10);
+  var r = askAI({prompt: ioPrompt(question, found, lib.catalog)});
+  return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
 
 /* Run once from the editor to approve Drive and external-request access. */
