@@ -8,6 +8,7 @@
      OWNER_CODE         required, your own code; it can remove any form
      DAILY_LIMIT        optional, AI calls per day for the team (default 300)
      MODEL              optional (default gpt-6.1-terra)
+     TRANSCRIBE_MODEL   optional, voice notes for REDEFINE On Field (default gpt-4o-transcribe, then whisper-1)
 */
 var COLLECTIONS = ['teamforms', 'teamformfiles'];
 var FOLDER_NAME = 'REDEFINE Form Filler Data';
@@ -57,6 +58,7 @@ function handle(q) {
     case 'iopack': return ioPackGet(String(q.have || ''));
     case 'ioput': if (role !== 'owner') fail('not_allowed'); return ioPut(String(q.name || ''), q.text);
     case 'ioask': return ioAsk(q);
+    case 'transcribe': return transcribe(q);
   }
   fail('invalid_request');
 }
@@ -113,6 +115,36 @@ function askAI(q, maxImages) {
   if (why === 'content_filter') fail('refused');
   if (!text) fail('empty_completion');
   return {text: text, truncated: msg.status === 'incomplete'};
+}
+
+/* ---------- REDEFINE On Field: voice notes to text ----------
+   The agent's 1-2 minute voice note after a meeting (Malaysian Mandarin, Hokkien, Cantonese, English, Malay, often mixed).
+   Audio passes through to OpenAI and is never stored. The hint lists local words so mixed speech is spelled right.
+   Optional script property TRANSCRIBE_MODEL tries that model first. */
+function transcribe(q) {
+  var key = prop('OPENAI_API_KEY'); if (!key) fail('no_api_key');
+  var b64 = String(q.audio || '');
+  if (!b64 || b64.length > 30000000) fail('audio_too_large');
+  var mime = String(q.mime || 'audio/mp4').split(';')[0].toLowerCase();
+  if (!/^audio\/[\w.+-]+$/.test(mime)) mime = 'audio/mp4';
+  var ext = {'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'm4a', 'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/wav': 'wav'}[mime] || 'm4a';
+  underDailyLimit();
+  var bytes = Utilities.base64Decode(b64);
+  var models = [prop('TRANSCRIBE_MODEL'), 'gpt-4o-transcribe', 'whisper-1'].filter(function (m, i, a) { return m && a.indexOf(m) === i; });
+  for (var i = 0; i < models.length; i++) {
+    var res = UrlFetchApp.fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'post', muteHttpExceptions: true, headers: {Authorization: 'Bearer ' + key},
+      payload: {file: Utilities.newBlob(bytes, mime, 'note.' + ext), model: models[i], response_format: 'json', prompt: String(q.hint || '').slice(0, 900)}
+    });
+    var status = res.getResponseCode(), body = res.getContentText();
+    if (status === 200) return {text: String(JSON.parse(body).text || ''), model: models[i]};
+    if (status === 401) fail('bad_api_key');
+    if (status === 429) fail(/insufficient_quota/.test(body) ? 'no_credit' : 'rate_limited');
+    if ((status === 400 || status === 403 || status === 404) && /model/i.test(body)) continue;   // try the next model
+    if (status === 400 || status === 413) fail('audio_rejected');
+    console.error('transcribe status ' + status); fail('upstream_error');
+  }
+  fail('bad_model');
 }
 
 /* ---------- shared blank forms, one Drive file per document ---------- */
