@@ -59,6 +59,8 @@ function handle(q) {
     case 'ioput': if (role !== 'owner') fail('not_allowed'); return ioPut(String(q.name || ''), q.text);
     case 'ioask': return ioAsk(q);
     case 'transcribe': return transcribe(q);
+    case 'tallyput': return tallyPut(q);
+    case 'tallyget': if (role !== 'owner') fail('not_allowed'); return {tally: tallyRead()};
   }
   fail('invalid_request');
 }
@@ -145,6 +147,29 @@ function transcribe(q) {
     console.error('transcribe status ' + status); fail('upstream_error');
   }
   fail('bad_model');
+}
+
+/* ---------- REDEFINE On Field: daily 三访 numbers for the GM ----------
+   Numbers only: agent name, date, how many people met, presentations, closed. No client names or details.
+   One Drive file onfield_tally.json = {agentKey: {name, days: {YYYY-MM-DD: {met, pres, closed}}}}, last 120 days kept. */
+function tallyFile() { var it = folder().getFilesByName('onfield_tally.json'); return it.hasNext() ? it.next() : null; }
+function tallyRead() { var f = tallyFile(); return f ? JSON.parse(f.getBlob().getDataAsString()) : {}; }
+function tallyPut(q) {
+  var name = String(q.name || '').trim().slice(0, 60), date = String(q.date || '');
+  if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(date)) fail('invalid_request');
+  var n = function (v) { v = Math.floor(+v || 0); return v < 0 ? 0 : v > 50 ? 50 : v; };
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var t = tallyRead(), key = name.toLowerCase().replace(/\s+/g, ' ');
+    t[key] = t[key] || {name: name, days: {}};
+    t[key].name = name;
+    t[key].days[date] = {met: n(q.met), pres: n(q.pres), closed: n(q.closed)};
+    var cutoff = Utilities.formatDate(new Date(Date.now() - 120 * 864e5), 'Asia/Kuala_Lumpur', 'yyyy-MM-dd');
+    Object.keys(t[key].days).forEach(function (d) { if (d < cutoff) delete t[key].days[d]; });
+    var f = tallyFile(), text = JSON.stringify(t);
+    if (f) f.setContent(text); else folder().createFile('onfield_tally.json', text, MimeType.PLAIN_TEXT);
+    return {ok: true};
+  } finally { lock.releaseLock(); }
 }
 
 /* ---------- shared blank forms, one Drive file per document ---------- */
