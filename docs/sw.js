@@ -1,6 +1,6 @@
 // Keeps the app shell available and picks up new versions. Only GET requests to this site and the
 // script and font CDNs are handled; team-server calls never touch this cache.
-const CACHE = 'rff-eda516e97c0a';
+const CACHE = 'rff-0937ff1a2da5';
 const SHELL = ['./', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 const CDN = /^https:\/\/(cdnjs\.cloudflare\.com|fonts\.googleapis\.com|fonts\.gstatic\.com)\//;
 

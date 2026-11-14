@@ -27,7 +27,7 @@
   .thumb .row{gap:4px;justify-content:space-between}
   .thumb .btn{padding:4px 8px;min-height:34px}
   .cropper{position:fixed;inset:0;z-index:45;background:#111;color:#fff;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 8px) max(12px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 8px) max(12px,env(safe-area-inset-left,0px))}
-  .cropper .stage{flex:1;position:relative;min-height:0;display:grid;place-items:center;touch-action:none}
+  .cropper .stage{flex:1;position:relative;min-height:0;display:grid;place-items:center;touch-action:none;padding:22px}
   .cropper .stage canvas{max-width:100%;max-height:100%;display:block}
   .cropper svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .cropper .hd{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;border:3px solid #fff;background:rgba(198,47,59,.85);touch-action:none;cursor:grab}
@@ -35,6 +35,8 @@
   .cropper .bar .btn{background:#222;color:#fff;border-color:#444}
   .cropper .bar .btn[aria-pressed="true"]{background:#fff;color:#111}
   .cropper .bar .btn.primary{background:var(--stamp);border-color:var(--stamp)}
+  .cropper.cam video{max-width:100%;max-height:100%;display:block;object-fit:contain}
+  .cropper .camlast{width:44px;height:58px;object-fit:cover;border:2px solid #fff;border-radius:6px;margin-left:8px}
   .livehint{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:6px 14px;border-radius:999px;font-size:14px;white-space:nowrap;pointer-events:none}
   .livecount{color:#fff;font-size:13px;opacity:.85}
   .cropper .stage.flash{background:#fff}
@@ -173,16 +175,16 @@
     if (view === 'result') return;
     pScan.innerHTML = `
       <div class="eyebrow">Scan &amp; sign</div><h2>Scan a document</h2>
-      <p class="lede">Snap an IC, receipt or any paper. The app straightens and cleans it, then you can add text, your signature or a watermark and send it as a PDF. Scans stay on this phone until you send them.</p>
-      <div class="row">${liveOK ? '<button class="btn primary" id="scLive">Live scan (auto)</button>' : ''}<label class="btn ${liveOK ? '' : 'primary'}" for="scCam">Take a photo</label><input type="file" id="scCam" accept="image/*" capture="environment" hidden>
+      <p class="lede">Snap an IC, receipt or any paper. The camera stays open so you can take page after page. Then tap Adjust on each page to crop it, add text, your signature or a watermark, and send it as a PDF. Scans stay on this phone until you send them.</p>
+      <div class="row">${camOK ? '<button class="btn primary" id="scOpenCam">Scan with camera</button>' : '<label class="btn primary" for="scCam">Take a photo</label>'}<input type="file" id="scCam" accept="image/*" capture="environment" hidden>
         <label class="btn" for="scPick">Add photos or a PDF</label><input type="file" id="scPick" accept="image/*,.pdf,application/pdf" multiple hidden>
         ${scanPages.length ? '<button class="btn ghost" id="scClear">Start over</button>' : ''}</div>
       <div class="status" id="scStatus" style="margin-top:8px"></div>
-      <div class="thumbs" id="scThumbs">${scanPages.map((p, i) => `<div class="thumb" data-id="${p.id}"><img src="${p.out.toDataURL('image/jpeg', .5)}" alt="Page ${i + 1}" data-edit><div class="row"><span class="note">Page ${i + 1}</span><button class="btn sm" data-edit>Adjust</button></div><div class="row"><button class="btn sm" data-up ${i ? '' : 'disabled'} aria-label="Move up">↑</button><button class="btn sm" data-down ${i < scanPages.length - 1 ? '' : 'disabled'} aria-label="Move down">↓</button><button class="btn sm" data-del aria-label="Delete page">✕</button></div></div>`).join('')}</div>
-      ${scanPages.length ? `<div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn ink" id="scNext">Next: add text, signature, watermark →</button></div>` : '<p class="empty">No pages yet. Take a photo to start.</p>'}`;
+      ${scanPages.some(p => !p.quad && !p.adjusted) ? '<p class="note" style="margin:10px 0 0">Tap Adjust on a page to crop it: drag the four corners to the edges of the paper.</p>' : ''}<div class="thumbs" id="scThumbs">${scanPages.map((p, i) => `<div class="thumb" data-id="${p.id}"><img src="${p.out.toDataURL('image/jpeg', .5)}" alt="Page ${i + 1}" data-edit><div class="row"><span class="note">Page ${i + 1}</span><button class="btn sm" data-edit>Adjust</button></div><div class="row"><button class="btn sm" data-up ${i ? '' : 'disabled'} aria-label="Move up">↑</button><button class="btn sm" data-down ${i < scanPages.length - 1 ? '' : 'disabled'} aria-label="Move down">↓</button><button class="btn sm" data-del aria-label="Delete page">✕</button></div></div>`).join('')}</div>
+      ${scanPages.length ? `<div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn ink" id="scNext">Next: add text, signature, watermark →</button></div>` : '<p class="empty">No pages yet. Tap Scan with camera to start.</p>'}`;
     const add = e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) addFiles(fs); };
     q('#scCam').onchange = add; q('#scPick').onchange = add;
-    if (q('#scLive')) q('#scLive').onclick = openLive;
+    if (q('#scOpenCam')) q('#scOpenCam').onclick = openCamera;
     if (q('#scClear')) q('#scClear').onclick = e => { if (!e.currentTarget.dataset.armed) { e.currentTarget.dataset.armed = 1; e.currentTarget.textContent = 'Tap again to remove all pages'; return; } scanPages = []; renderScan(); };
     q('#scThumbs').onclick = e => {
       const card = e.target.closest('.thumb'); if (!card) return; const i = scanPages.findIndex(p => p.id === card.dataset.id), p = scanPages[i];
@@ -194,54 +196,30 @@
     if (q('#scNext')) q('#scNext').onclick = () => openMarkup({pages: scanPages.map(p => ({kind: 'img', canvas: p.out, w: p.out.width, h: p.out.height})), name: 'Scan_' + today().split('/').reverse().join('-'), back: 'scan'});
   }
 
-  const liveOK = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-  /* live scanner: the camera view with a page outline that follows the paper, and a capture once the outline holds still */
-  async function openLive() {
+  const camOK = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  /* in-app camera that stays open between shots; pages are cropped by hand afterwards */
+  async function openCamera() {
     let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 3840}, height: {ideal: 2160}}, audio: false}); }
-    catch (e) { say(e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow the camera for this app in your phone settings, or use Take a photo.' : 'The camera could not start here. Use Take a photo instead.'); return; }
-    const ui = h(`<div class="cropper live" role="dialog" aria-label="Live scan"><div class="stage"><canvas></canvas><video playsinline muted autoplay hidden></video><div class="livehint">Point at the page</div></div>
-      <div class="bar"><label class="chk" style="color:#fff;margin:0"><input type="checkbox" id="lvAuto" checked> Auto capture</label><span class="livecount" id="lvCount"></span></div>
-      <div class="bar"><button class="btn" data-a="done">Done</button><button class="btn primary shutter" data-a="shot" aria-label="Capture page">Capture</button></div></div>`);
+    try { stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 4032}, height: {ideal: 3024}}, audio: false}); }
+    catch (e) { say(e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow the camera for this app in your phone settings.' : 'The camera could not start here.'); const inp = q('#scCam'); if (inp) inp.click(); return; }
+    const ui = h(`<div class="cropper cam" role="dialog" aria-label="Camera"><div class="stage"><video playsinline muted autoplay></video></div>
+      <div class="bar"><span class="livecount" id="camCount">Take a photo of the first page</span></div>
+      <div class="bar"><button class="btn" data-a="done">Done</button><button class="btn primary shutter" data-a="shot" aria-label="Take photo">Take photo</button><img class="camlast" alt="" hidden></div></div>`);
     document.body.appendChild(ui);
-    const video = ui.querySelector('video'), cv = ui.querySelector('canvas'), g = cv.getContext('2d'), hint = ui.querySelector('.livehint'), stage = ui.querySelector('.stage');
+    const video = ui.querySelector('video'), stage = ui.querySelector('.stage'), last = ui.querySelector('.camlast'), count = ui.querySelector('#camCount');
     video.srcObject = stream; try { await video.play(); } catch (e) {}
-    let quad = null, history = [], armedAt = null, last = 0, alive = true, busy = false, taken = 0, lastShot = null;
-    const fit = () => { const r = stage.getBoundingClientRect(), vw = video.videoWidth || 16, vh = video.videoHeight || 9, s = Math.min(r.width / vw, r.height / vh), k = Math.min(2, devicePixelRatio || 1); cv.style.width = vw * s + 'px'; cv.style.height = vh * s + 'px'; cv.width = Math.round(vw * s * k); cv.height = Math.round(vh * s * k); };
-    const diag = () => Math.hypot(video.videoWidth, video.videoHeight) || 1;
-    const moved = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1]))) / diag();
-    const shoot = async (auto) => {
+    let taken = 0, busy = false;
+    const shoot = () => {
       if (busy || !video.videoWidth) return; busy = true;
       const full = document.createElement('canvas'), kk = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight)); full.width = Math.round(video.videoWidth * kk); full.height = Math.round(video.videoHeight * kk); full.getContext('2d').drawImage(video, 0, 0, full.width, full.height);
-      const q2 = refineQuad(full, quad ? quad.map(([x, y]) => [x * kk, y * kk]) : detectQuad(full, 480));
-      stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 180);
-      await new Promise(r => setTimeout(r, 20));
-      const p = {id: uidT(), src: full, quad: q2, rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p); taken++;
-      ui.querySelector('#lvCount').textContent = taken + ' page' + (taken > 1 ? 's' : '') + ' captured'; lastShot = quad; history = []; armedAt = null; busy = false;
-      hint.textContent = auto ? 'Captured. Turn to the next page, or tap Done.' : 'Captured.';
+      stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 150);
+      taken++; count.textContent = taken + ' page' + (taken > 1 ? 's' : '') + ' taken. Next page, or tap Done.';
+      last.src = full.toDataURL('image/jpeg', .4); last.hidden = false;
+      // clean the page after the flash so the camera stays responsive for the next shot
+      setTimeout(() => { const p = {id: uidT(), src: full, quad: null, rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p); busy = false; }, 30);
     };
-    const loop = (t) => {
-      if (!alive) return;
-      if (video.videoWidth && (cv.width < 20 || Math.abs(parseFloat(cv.style.width) - cv.width / Math.min(2, devicePixelRatio || 1)) > 2)) fit();
-      if (video.videoWidth) {
-        g.drawImage(video, 0, 0, cv.width, cv.height);
-        if (t - last > 220 && !busy) { last = t; const qd = detectQuad(video, 300, true);
-          if (qd) { quad = quad && moved(qd, quad) < .03 ? quad.map((p, i) => [p[0] * .5 + qd[i][0] * .5, p[1] * .5 + qd[i][1] * .5]) : qd; history.push(quad); if (history.length > 8) history.shift(); }
-          else { quad = null; history = []; armedAt = null; if (lastShot) lastShot = null; }
-          const steady = quad && history.length >= 5 && history.every(hq => moved(hq, quad) < .015), fresh = !lastShot || (quad && moved(quad, lastShot) > .08);
-          if (!quad) hint.textContent = taken ? 'Point at the next page' : 'Point at the page';
-          else if (!fresh) hint.textContent = 'Turn to the next page, or tap Done';
-          else if (!steady) { hint.textContent = 'Hold steady…'; armedAt = null; }
-          else if (ui.querySelector('#lvAuto').checked) { armedAt = armedAt || t; hint.textContent = 'Capturing…'; if (t - armedAt > 500) shoot(true); }
-          else hint.textContent = 'Page found. Tap Capture.';
-        }
-        if (quad) { const s = cv.width / video.videoWidth; g.save(); g.lineWidth = 4 * Math.min(2, devicePixelRatio || 1); g.strokeStyle = '#3ddc84'; g.fillStyle = 'rgba(61,220,132,.18)'; g.beginPath(); quad.forEach(([x, y], i) => i ? g.lineTo(x * s, y * s) : g.moveTo(x * s, y * s)); g.closePath(); g.fill(); g.stroke(); g.restore(); }
-      }
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop); window.addEventListener('resize', fit);
-    const close = () => { alive = false; stream.getTracks().forEach(tr => tr.stop()); window.removeEventListener('resize', fit); ui.remove(); renderScan(); };
-    ui.addEventListener('click', e => { const a = e.target.closest('[data-a]'); if (!a) return; if (a.dataset.a === 'shot') shoot(false); if (a.dataset.a === 'done') close(); });
+    const close = () => { stream.getTracks().forEach(tr => tr.stop()); ui.remove(); const wait = () => busy ? setTimeout(wait, 50) : renderScan(); wait(); };
+    ui.addEventListener('click', e => { const b2 = e.target.closest('[data-a]'); if (!b2) return; if (b2.dataset.a === 'shot') shoot(); if (b2.dataset.a === 'done') close(); });
   }
 
   async function addFiles(files) {
@@ -260,7 +238,7 @@
         } else {
           const bmp = await createImageBitmap(f), k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
           const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-          const p = {id: uidT(), src: c, quad: autoQuad(c), rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p);
+          const p = {id: uidT(), src: c, quad: null, rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p);
         }
       } catch (e) { console.error(e); say('Could not read ' + f.name + '. iPhone HEIC photos may need to be shared as JPG.'); }
     }
@@ -513,7 +491,7 @@
       if (a.dataset.a === 'full') { draft.quad = fullQuad(p.src); place(); }
       if (a.dataset.a === 'rot') { draft.rot = (draft.rot + 90) % 360; say('Turned ' + draft.rot + '°. You will see it after Apply.'); }
       if (a.dataset.a === 'cancel') close();
-      if (a.dataset.a === 'ok') { a.textContent = 'Working…'; setTimeout(() => { const full = draft.quad.every((v, i) => Math.hypot(v[0] - fullQuad(p.src)[i][0], v[1] - fullQuad(p.src)[i][1]) < 2); Object.assign(p, {quad: full ? null : draft.quad, filter: draft.filter, rot: draft.rot}); p.out = process(p); close(); renderScan(); }, 30); }
+      if (a.dataset.a === 'ok') { a.textContent = 'Working…'; setTimeout(() => { const full = draft.quad.every((v, i) => Math.hypot(v[0] - fullQuad(p.src)[i][0], v[1] - fullQuad(p.src)[i][1]) < 2); Object.assign(p, {quad: full ? null : draft.quad, filter: draft.filter, rot: draft.rot, adjusted: true}); p.out = process(p); close(); renderScan(); }, 30); }
     });
   }
 
