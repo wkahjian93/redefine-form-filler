@@ -1849,7 +1849,7 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     const shoot = async (auto) => {
       if (busy || !video.videoWidth) return; busy = true;
       const full = document.createElement('canvas'), kk = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight)); full.width = Math.round(video.videoWidth * kk); full.height = Math.round(video.videoHeight * kk); full.getContext('2d').drawImage(video, 0, 0, full.width, full.height);
-      const q2 = quad ? quad.map(([x, y]) => [x * kk, y * kk]) : detectQuad(full, 480);
+      const q2 = refineQuad(full, quad ? quad.map(([x, y]) => [x * kk, y * kk]) : detectQuad(full, 480));
       stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 180);
       await new Promise(r => setTimeout(r, 20));
       const p = {id: uidT(), src: full, quad: q2, rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p); taken++;
@@ -1923,11 +1923,14 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
       mag[i] = Math.hypot(gx, gy); if (mag[i] > mx) mx = mag[i];
     }
     const bins = new Uint32Array(256), sc = 255 / (mx || 1); for (let i = 0; i < w * hh; i++) bins[Math.min(255, (mag[i] * sc) | 0)]++;
-    let acc8 = 0, bi8 = 255; while (bi8 > 0 && acc8 < w * hh * .08) acc8 += bins[bi8--];
-    const thr = Math.max(18, (bi8 + 1) / sc);
-    const e = new Uint8Array(w * hh); for (let i = 0; i < w * hh; i++) if (mag[i] >= thr) e[i] = 1;
+    let acc8 = 0, bi8 = 255; while (bi8 > 0 && acc8 < w * hh * .1) acc8 += bins[bi8--];
+    const thr = Math.max(16, (bi8 + 1) / sc);
+    // faint edges (white paper on a light desk) count when checking an outline, though they are too weak to find lines with
+    let accW = acc8, biW = bi8; while (biW > 0 && accW < w * hh * .3) accW += bins[biW--];
+    const weak = Math.max(9, (biW + 1) / sc);
+    const e = new Uint8Array(w * hh), ew = new Uint8Array(w * hh); for (let i = 0; i < w * hh; i++) { if (mag[i] >= thr) e[i] = 1; if (mag[i] >= weak) ew[i] = 1; }
     const near = new Uint8Array(w * hh);
-    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) if (e[y * w + x]) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < hh && xx >= 0 && xx < w) near[yy * w + xx] = 1; }
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) if (ew[y * w + x]) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < hh && xx >= 0 && xx < w) near[yy * w + xx] = 1; }
     return {e, near};
   }
   function support(quad, near, w, hh) {
@@ -1949,21 +1952,34 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
       const t = Math.floor(bi / R), r = bi % R - diag; lines.push({t, r, v});
       for (let dt = -8; dt <= 8; dt++) for (let dr = -12; dr <= 12; dr++) { let tt = t + dt, rr = r + dr; if (tt < 0) { tt += T; rr = -rr; } if (tt >= T) { tt -= T; rr = -rr; } const j = tt * R + rr + diag; if (j >= 0 && j < work.length) work[j] = 0; }
     }
-    const H = lines.filter(l => l.t >= 45 && l.t < 135).slice(0, 7), V = lines.filter(l => l.t < 45 || l.t >= 135).slice(0, 7);
+    const H = lines.filter(l => l.t >= 45 && l.t < 135).slice(0, 10), V = lines.filter(l => l.t < 45 || l.t >= 135).slice(0, 10);
     const meet = (a, b) => { const d = cs[a.t] * sn[b.t] - sn[a.t] * cs[b.t]; if (Math.abs(d) < 1e-6) return null; return [(a.r * sn[b.t] - sn[a.t] * b.r) / d, (cs[a.t] * b.r - a.r * cs[b.t]) / d]; };
     const yAt = l => (l.r - (w / 2) * cs[l.t]) / sn[l.t], xAt = l => (l.r - (hh / 2) * sn[l.t]) / cs[l.t];
-    let best = null;
+    const found = [];
     for (let i = 0; i < H.length; i++) for (let j = i + 1; j < H.length; j++) for (let a = 0; a < V.length; a++) for (let b = a + 1; b < V.length; b++) {
       let [t1, t2] = yAt(H[i]) < yAt(H[j]) ? [H[i], H[j]] : [H[j], H[i]], [l1, l2] = xAt(V[a]) < xAt(V[b]) ? [V[a], V[b]] : [V[b], V[a]];
       const quad = [meet(t1, l1), meet(t1, l2), meet(t2, l2), meet(t2, l1)];
       if (quad.some(p => !p || p[0] < -w * .04 || p[0] > w * 1.04 || p[1] < -hh * .04 || p[1] > hh * 1.04) || !convex(quad)) continue;
-      const area = areaOf(quad) / (w * hh); if (area < .035) continue;
+      const area = areaOf(quad) / (w * hh); if (area < .015) continue;
       const sp = support(quad, near, w, hh); if (sp < .5) continue;
-      const score = sp * (.55 + .45 * Math.min(1, area / .6));
-      if (!best || score > best.score) best = {quad, score};
+      found.push({quad, sp, area});
     }
-    return best;
+    return found;
   }
+  // a paper edge separates paper from background; a table border inside the page has paper on both sides
+  function edgeContrast(quad, gray, w, hh) {
+    const cx = quad.reduce((s, p) => s + p[0], 0) / 4, cy = quad.reduce((s, p) => s + p[1], 0) / 4, off = Math.max(2.5, Math.hypot(w, hh) * .008), sides = [];
+    const at = (x, y) => { x = Math.round(x); y = Math.round(y); return x >= 0 && y >= 0 && x < w && y < hh ? gray[y * w + x] : null; };
+    for (let s = 0; s < 4; s++) {
+      const [x0, y0] = quad[s], [x1, y1] = quad[(s + 1) % 4], L = Math.hypot(x1 - x0, y1 - y0) || 1; let nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
+      const mx = (x0 + x1) / 2, my = (y0 + y1) / 2; if ((mx + nx - cx) ** 2 + (my + ny - cy) ** 2 < (mx - cx) ** 2 + (my - cy) ** 2) { nx = -nx; ny = -ny; }
+      let sum = 0, n = 0;
+      for (let i = 1; i < 20; i++) { const x = x0 + (x1 - x0) * i / 20, y = y0 + (y1 - y0) * i / 20, a = at(x - nx * off, y - ny * off), b = at(x + nx * off, y + ny * off); if (a !== null && b !== null) { sum += Math.abs(a - b); n++; } }
+      sides.push(n ? sum / n : 0);
+    }
+    sides.sort((a, b) => a - b); return (sides[1] + sides[2] + sides[3]) / 3 * .7 + sides[0] * .3;
+  }
+  const inside = (pt, q) => { for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4]; if ((b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0]) < -1) return false; } return true; };
   function brightQuad(gray, w, hh) {
     const hist = new Array(256).fill(0); for (let i = 0; i < w * hh; i++) hist[Math.min(255, gray[i] | 0)]++;
     let sum = 0, sumB = 0, wB = 0, best = 0, t = 128; for (let i = 0; i < 256; i++) sum += i * hist[i];
@@ -1976,24 +1992,61 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
         for (const n of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < hh - 1 ? j + w : -1]) if (n >= 0 && !seen[n] && gray[n] > t) { seen[n] = 1; stack.push(n); } }
       if (!bestComp || comp.length > bestComp.length) bestComp = comp;
     }
-    if (!bestComp || bestComp.length < w * hh * .035 || bestComp.length > w * hh * .97) return null;
+    if (!bestComp || bestComp.length < w * hh * .015 || bestComp.length > w * hh * .97) return null;
     let tl, tr, br, bl, a = 1e9, b = -1e9, cc = -1e9, dd = 1e9;
     for (const j of bestComp) { const x = j % w, y = (j / w) | 0; if (x + y < a) { a = x + y; tl = [x, y]; } if (x + y > b) { b = x + y; br = [x, y]; } if (x - y > cc) { cc = x - y; tr = [x, y]; } if (x - y < dd) { dd = x - y; bl = [x, y]; } }
     return [tl, tr, br, bl];
   }
   // returns corners in the source's own pixels, or null; maxSide trades accuracy for speed (live video uses less)
   function detectQuad(c, maxSide, strict) {
-    const {gray, w, h: hh, k} = smallGray(c, maxSide || 480), {e, near} = edgeMap(gray, w, hh), cands = [];
-    const hq = houghQuad(e, near, w, hh); if (hq) cands.push(hq);
-    const bq = brightQuad(gray, w, hh); if (bq && convex(bq)) { const sp = support(bq, near, w, hh), area = areaOf(bq) / (w * hh); if (sp >= .45) cands.push({quad: bq, score: sp * (.55 + .45 * Math.min(1, area / .6)) * .95}); }
+    const {gray, w, h: hh, k} = smallGray(c, maxSide || 480), {e, near} = edgeMap(gray, w, hh);
+    const cands = houghQuad(e, near, w, hh);
+    const bq = brightQuad(gray, w, hh); if (bq && convex(bq)) { const sp = support(bq, near, w, hh); if (sp >= .45) cands.push({quad: bq, sp: sp * .97, area: areaOf(bq) / (w * hh)}); }
     if (!cands.length) return null;
-    const best = cands.sort((a, b) => b.score - a.score)[0];
-    // live auto-capture must not fire on clutter: insist on a well-outlined page of a fair size
-    if (strict && (areaOf(best.quad) / (w * hh) < .1 || best.score < .62)) return null;
+    cands.forEach(cd => { cd.ct = edgeContrast(cd.quad, gray, w, hh); cd.score = cd.sp ** 1.5 * Math.max(.1, Math.min(1, cd.ct / 22)) * (.45 + .55 * Math.sqrt(Math.min(1, cd.area / .45))); });
+    cands.sort((a, b) => b.score - a.score);
+    let best = cands[0];
+    // the page, not a box printed on it: an outline that contains the winner and nearly matches its score is the paper's edge
+    for (const cd of cands) if (cd !== best && cd.area > best.area * 1.15 && cd.score >= best.score * .8 && cd.ct >= 10 && best.quad.every(p => inside(p, cd.quad))) best = cd;
+    // live auto-capture must not fire on clutter: insist on a well-outlined page of a fair size with real contrast
+    if (strict && (best.area < .08 || best.sp < .72 || best.ct < 16)) return null;
+    if (!strict && best.score < .12) return null;
     const W = (c.width || c.videoWidth), H = (c.height || c.videoHeight);
     return best.quad.map(([x, y]) => [Math.max(0, Math.min(W, x / k)), Math.max(0, Math.min(H, y / k))]);
   }
-  const autoQuad = c => detectQuad(c, 480);
+  /* sharpen each edge on the full-size picture: search across the rough edge for the strongest brightness step,
+     fit a straight line through those points, and meet the four lines at the corners */
+  function refineQuad(c, quad) {
+    if (!quad) return quad;
+    const {gray, w, h: hh, k} = smallGray(c, 1600), Q = quad.map(([x, y]) => [x * k, y * k]), diag = Math.hypot(w, hh), R = Math.max(6, Math.round(diag * .012));
+    const cx = Q.reduce((s, p) => s + p[0], 0) / 4, cy = Q.reduce((s, p) => s + p[1], 0) / 4;
+    const G = (x, y) => { const xi = Math.max(0, Math.min(w - 2, x | 0)), yi = Math.max(0, Math.min(hh - 2, y | 0)), fx = x - xi, fy = y - yi, i = yi * w + xi; return gray[i] * (1 - fx) * (1 - fy) + gray[i + 1] * fx * (1 - fy) + gray[i + w] * (1 - fx) * fy + gray[i + w + 1] * fx * fy; };
+    const lines = [];
+    for (let s = 0; s < 4; s++) {
+      const [x0, y0] = Q[s], [x1, y1] = Q[(s + 1) % 4], L = Math.hypot(x1 - x0, y1 - y0) || 1; let nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
+      const mx = (x0 + x1) / 2, my = (y0 + y1) / 2; if ((mx + nx - cx) ** 2 + (my + ny - cy) ** 2 < (mx - cx) ** 2 + (my - cy) ** 2) { nx = -nx; ny = -ny; }
+      let pts = [];
+      for (let i = 2; i < 38; i++) {
+        const t = i / 40, px = x0 + (x1 - x0) * t, py = y0 + (y1 - y0) * t; let bestD = 0, bestS = null;
+        for (let d = -R; d <= R; d++) { const x = px + nx * d, y = py + ny * d; if (x < 2 || y < 2 || x > w - 3 || y > hh - 3) continue; const g = Math.abs(G(x + nx * 1.5, y + ny * 1.5) - G(x - nx * 1.5, y - ny * 1.5)); if (g > bestD) { bestD = g; bestS = d; } }
+        if (bestS !== null && bestD > 12) pts.push([px + nx * bestS, py + ny * bestS]);
+      }
+      for (let it = 0; it < 3 && pts.length >= 10; it++) {
+        const mxp = pts.reduce((a, p) => a + p[0], 0) / pts.length, myp = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+        let sxx = 0, syy = 0, sxy = 0; pts.forEach(([x, y]) => { sxx += (x - mxp) ** 2; syy += (y - myp) ** 2; sxy += (x - mxp) * (y - myp); });
+        const ang = .5 * Math.atan2(2 * sxy, sxx - syy), dx = Math.cos(ang), dy = Math.sin(ang);
+        const line = {px: mxp, py: myp, dx, dy}, dist = p => Math.abs((p[0] - mxp) * dy - (p[1] - myp) * dx);
+        const kept = pts.filter(p => dist(p) < (it ? 1.5 : 3)); lines[s] = line; if (kept.length === pts.length) break; pts = kept;
+      }
+      if (!lines[s] || pts.length < 10) return quad;
+    }
+    const meet = (a, b) => { const den = a.dx * b.dy - a.dy * b.dx; if (Math.abs(den) < 1e-6) return null; const t = ((b.px - a.px) * b.dy - (b.py - a.py) * b.dx) / den; return [a.px + a.dx * t, a.py + a.dy * t]; };
+    const out = [meet(lines[3], lines[0]), meet(lines[0], lines[1]), meet(lines[1], lines[2]), meet(lines[2], lines[3])];
+    if (out.some(p => !p) || out.some((p, i) => Math.hypot(p[0] - Q[i][0], p[1] - Q[i][1]) > diag * .03)) return quad;
+    const W0 = c.width || c.videoWidth, H0 = c.height || c.videoHeight;
+    return out.map(([x, y]) => [Math.max(0, Math.min(W0, x / k)), Math.max(0, Math.min(H0, y / k))]);
+  }
+  const autoQuad = c => refineQuad(c, detectQuad(c, 480));
   const fullQuad = c => [[0, 0], [c.width, 0], [c.width, c.height], [0, c.height]];
 
   function solve8(src, dst) {
