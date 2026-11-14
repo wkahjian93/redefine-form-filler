@@ -1940,6 +1940,11 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     return tot ? hit / tot : 0;
   }
   const areaOf = q => Math.abs(q.reduce((s, p, i) => { const r = q[(i + 1) % 4]; return s + p[0] * r[1] - r[0] * p[1]; }, 0)) / 2;
+  // a real page seen by a camera: opposite sides of similar length, corners not too sharp or too flat
+  const plausible = q => { const L = i => Math.hypot(q[(i + 1) % 4][0] - q[i][0], q[(i + 1) % 4][1] - q[i][1]), s = [0, 1, 2, 3].map(L);
+    if (Math.max(s[0], s[2]) / Math.max(1, Math.min(s[0], s[2])) > 2.3 || Math.max(s[1], s[3]) / Math.max(1, Math.min(s[1], s[3])) > 2.3) return false;
+    for (let i = 0; i < 4; i++) { const a = q[(i + 3) % 4], b = q[i], c = q[(i + 1) % 4], v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]], ang = Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1)))) * 180 / Math.PI; if (ang < 45 || ang > 135) return false; }
+    return true; };
   const convex = q => { let sign = 0; for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4], c = q[(i + 2) % 4], z = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]); if (Math.abs(z) < 1e-6) return false; if (!sign) sign = Math.sign(z); else if (Math.sign(z) !== sign) return false; } return true; };
   function houghQuad(e, near, w, hh) {
     const diag = Math.ceil(Math.hypot(w, hh)), R = 2 * diag + 1, T = 180, acc = new Int32Array(T * R), cs = [], sn = [];
@@ -1959,7 +1964,7 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     for (let i = 0; i < H.length; i++) for (let j = i + 1; j < H.length; j++) for (let a = 0; a < V.length; a++) for (let b = a + 1; b < V.length; b++) {
       let [t1, t2] = yAt(H[i]) < yAt(H[j]) ? [H[i], H[j]] : [H[j], H[i]], [l1, l2] = xAt(V[a]) < xAt(V[b]) ? [V[a], V[b]] : [V[b], V[a]];
       const quad = [meet(t1, l1), meet(t1, l2), meet(t2, l2), meet(t2, l1)];
-      if (quad.some(p => !p || p[0] < -w * .04 || p[0] > w * 1.04 || p[1] < -hh * .04 || p[1] > hh * 1.04) || !convex(quad)) continue;
+      if (quad.some(p => !p || p[0] < -w * .04 || p[0] > w * 1.04 || p[1] < -hh * .04 || p[1] > hh * 1.04) || !convex(quad) || !plausible(quad)) continue;
       const area = areaOf(quad) / (w * hh); if (area < .015) continue;
       const sp = support(quad, near, w, hh); if (sp < .5) continue;
       found.push({quad, sp, area});
@@ -1974,10 +1979,12 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
       const [x0, y0] = quad[s], [x1, y1] = quad[(s + 1) % 4], L = Math.hypot(x1 - x0, y1 - y0) || 1; let nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
       const mx = (x0 + x1) / 2, my = (y0 + y1) / 2; if ((mx + nx - cx) ** 2 + (my + ny - cy) ** 2 < (mx - cx) ** 2 + (my - cy) ** 2) { nx = -nx; ny = -ny; }
       let sum = 0, n = 0;
-      for (let i = 1; i < 20; i++) { const x = x0 + (x1 - x0) * i / 20, y = y0 + (y1 - y0) * i / 20, a = at(x - nx * off, y - ny * off), b = at(x + nx * off, y + ny * off); if (a !== null && b !== null) { sum += Math.abs(a - b); n++; } }
+      for (let i = 1; i < 20; i++) { const x = x0 + (x1 - x0) * i / 20, y = y0 + (y1 - y0) * i / 20, a = at(x - nx * off, y - ny * off), b = at(x + nx * off, y + ny * off); if (a !== null && b !== null) { sum += a - b; n++; } }
       sides.push(n ? sum / n : 0);
     }
-    sides.sort((a, b) => a - b); return (sides[1] + sides[2] + sides[3]) / 3 * .7 + sides[0] * .3;
+    // a real page is brighter (or darker) than its background along all four edges; patterns flip from side to side
+    const same = sides.every(v => v > 0) || sides.every(v => v < 0), mags = sides.map(Math.abs).sort((a, b) => a - b);
+    return {ct: (mags[1] + mags[2] + mags[3]) / 3 * .7 + mags[0] * .3, minSide: same ? mags[0] : 0};
   }
   const inside = (pt, q) => { for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4]; if ((b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0]) < -1) return false; } return true; };
   function brightQuad(gray, w, hh) {
@@ -2001,16 +2008,17 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
   function detectQuad(c, maxSide, strict) {
     const {gray, w, h: hh, k} = smallGray(c, maxSide || 480), {e, near} = edgeMap(gray, w, hh);
     const cands = houghQuad(e, near, w, hh);
-    const bq = brightQuad(gray, w, hh); if (bq && convex(bq)) { const sp = support(bq, near, w, hh); if (sp >= .45) cands.push({quad: bq, sp: sp * .97, area: areaOf(bq) / (w * hh)}); }
+    const bq = brightQuad(gray, w, hh); if (bq && convex(bq) && plausible(bq)) { const sp = support(bq, near, w, hh); if (sp >= .45) cands.push({quad: bq, sp: sp * .97, area: areaOf(bq) / (w * hh)}); }
     if (!cands.length) return null;
-    cands.forEach(cd => { cd.ct = edgeContrast(cd.quad, gray, w, hh); cd.score = cd.sp ** 1.5 * Math.max(.1, Math.min(1, cd.ct / 22)) * (.45 + .55 * Math.sqrt(Math.min(1, cd.area / .45))); });
+    cands.forEach(cd => { const ec = edgeContrast(cd.quad, gray, w, hh); cd.ct = ec.ct; cd.minSide = ec.minSide; cd.score = cd.sp ** 1.5 * Math.max(.1, Math.min(1, cd.ct / 22)) * (cd.minSide >= 8 ? 1 : .5) * (.45 + .55 * Math.sqrt(Math.min(1, cd.area / .45))); });
     cands.sort((a, b) => b.score - a.score);
     let best = cands[0];
     // the page, not a box printed on it: an outline that contains the winner and nearly matches its score is the paper's edge
     for (const cd of cands) if (cd !== best && cd.area > best.area * 1.15 && cd.score >= best.score * .8 && cd.ct >= 10 && best.quad.every(p => inside(p, cd.quad))) best = cd;
     // live auto-capture must not fire on clutter: insist on a well-outlined page of a fair size with real contrast
-    if (strict && (best.area < .08 || best.sp < .72 || best.ct < 16)) return null;
-    if (!strict && best.score < .12) return null;
+    if (strict && (best.area < .08 || best.sp < .65 || best.minSide < 15)) return null;
+    // no outline with paper-like edges on all four sides: keep the whole photo rather than guess a wrong crop
+    if (!strict && (best.score < .12 || best.minSide < 8)) return null;
     const W = (c.width || c.videoWidth), H = (c.height || c.videoHeight);
     return best.quad.map(([x, y]) => [Math.max(0, Math.min(W, x / k)), Math.max(0, Math.min(H, y / k))]);
   }
