@@ -1671,6 +1671,10 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
   .cropper .bar .btn{background:#222;color:#fff;border-color:#444}
   .cropper .bar .btn[aria-pressed="true"]{background:#fff;color:#111}
   .cropper .bar .btn.primary{background:var(--stamp);border-color:var(--stamp)}
+  .livehint{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;padding:6px 14px;border-radius:999px;font-size:14px;white-space:nowrap;pointer-events:none}
+  .livecount{color:#fff;font-size:13px;opacity:.85}
+  .cropper .stage.flash{background:#fff}
+  .cropper .bar .shutter{min-width:140px;padding:12px 18px;font-size:16px}
   .mk-tools{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;background:var(--paper);padding:10px 0;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--rule)}
   .mk-pages{display:flex;flex-direction:column;gap:16px;padding:14px 0;max-width:820px;margin:0 auto}
   .mk-page{position:relative;background:#fff;box-shadow:0 1px 0 var(--rule),0 6px 18px rgba(16,24,40,.1);touch-action:pan-y;overflow:hidden}
@@ -1806,7 +1810,7 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     pScan.innerHTML = `
       <div class="eyebrow">Scan &amp; sign</div><h2>Scan a document</h2>
       <p class="lede">Snap an IC, receipt or any paper. The app straightens and cleans it, then you can add text, your signature or a watermark and send it as a PDF. Scans stay on this phone until you send them.</p>
-      <div class="row"><label class="btn primary" for="scCam">Take a photo</label><input type="file" id="scCam" accept="image/*" capture="environment" hidden>
+      <div class="row">${liveOK ? '<button class="btn primary" id="scLive">Live scan (auto)</button>' : ''}<label class="btn ${liveOK ? '' : 'primary'}" for="scCam">Take a photo</label><input type="file" id="scCam" accept="image/*" capture="environment" hidden>
         <label class="btn" for="scPick">Add photos or a PDF</label><input type="file" id="scPick" accept="image/*,.pdf,application/pdf" multiple hidden>
         ${scanPages.length ? '<button class="btn ghost" id="scClear">Start over</button>' : ''}</div>
       <div class="status" id="scStatus" style="margin-top:8px"></div>
@@ -1814,6 +1818,7 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
       ${scanPages.length ? `<div class="row" style="justify-content:flex-end;margin-top:16px"><button class="btn ink" id="scNext">Next: add text, signature, watermark →</button></div>` : '<p class="empty">No pages yet. Take a photo to start.</p>'}`;
     const add = e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) addFiles(fs); };
     q('#scCam').onchange = add; q('#scPick').onchange = add;
+    if (q('#scLive')) q('#scLive').onclick = openLive;
     if (q('#scClear')) q('#scClear').onclick = e => { if (!e.currentTarget.dataset.armed) { e.currentTarget.dataset.armed = 1; e.currentTarget.textContent = 'Tap again to remove all pages'; return; } scanPages = []; renderScan(); };
     q('#scThumbs').onclick = e => {
       const card = e.target.closest('.thumb'); if (!card) return; const i = scanPages.findIndex(p => p.id === card.dataset.id), p = scanPages[i];
@@ -1823,6 +1828,56 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
       else if (e.target.closest('[data-del]')) { scanPages.splice(i, 1); renderScan(); }
     };
     if (q('#scNext')) q('#scNext').onclick = () => openMarkup({pages: scanPages.map(p => ({kind: 'img', canvas: p.out, w: p.out.width, h: p.out.height})), name: 'Scan_' + today().split('/').reverse().join('-'), back: 'scan'});
+  }
+
+  const liveOK = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  /* live scanner: the camera view with a page outline that follows the paper, and a capture once the outline holds still */
+  async function openLive() {
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: {ideal: 'environment'}, width: {ideal: 3840}, height: {ideal: 2160}}, audio: false}); }
+    catch (e) { say(e && e.name === 'NotAllowedError' ? 'Camera access was blocked. Allow the camera for this app in your phone settings, or use Take a photo.' : 'The camera could not start here. Use Take a photo instead.'); return; }
+    const ui = h(`<div class="cropper live" role="dialog" aria-label="Live scan"><div class="stage"><canvas></canvas><video playsinline muted autoplay hidden></video><div class="livehint">Point at the page</div></div>
+      <div class="bar"><label class="chk" style="color:#fff;margin:0"><input type="checkbox" id="lvAuto" checked> Auto capture</label><span class="livecount" id="lvCount"></span></div>
+      <div class="bar"><button class="btn" data-a="done">Done</button><button class="btn primary shutter" data-a="shot" aria-label="Capture page">Capture</button></div></div>`);
+    document.body.appendChild(ui);
+    const video = ui.querySelector('video'), cv = ui.querySelector('canvas'), g = cv.getContext('2d'), hint = ui.querySelector('.livehint'), stage = ui.querySelector('.stage');
+    video.srcObject = stream; try { await video.play(); } catch (e) {}
+    let quad = null, history = [], armedAt = null, last = 0, alive = true, busy = false, taken = 0, lastShot = null;
+    const fit = () => { const r = stage.getBoundingClientRect(), vw = video.videoWidth || 16, vh = video.videoHeight || 9, s = Math.min(r.width / vw, r.height / vh), k = Math.min(2, devicePixelRatio || 1); cv.style.width = vw * s + 'px'; cv.style.height = vh * s + 'px'; cv.width = Math.round(vw * s * k); cv.height = Math.round(vh * s * k); };
+    const diag = () => Math.hypot(video.videoWidth, video.videoHeight) || 1;
+    const moved = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1]))) / diag();
+    const shoot = async (auto) => {
+      if (busy || !video.videoWidth) return; busy = true;
+      const full = document.createElement('canvas'), kk = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight)); full.width = Math.round(video.videoWidth * kk); full.height = Math.round(video.videoHeight * kk); full.getContext('2d').drawImage(video, 0, 0, full.width, full.height);
+      const q2 = quad ? quad.map(([x, y]) => [x * kk, y * kk]) : detectQuad(full, 480);
+      stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 180);
+      await new Promise(r => setTimeout(r, 20));
+      const p = {id: uidT(), src: full, quad: q2, rot: 0, filter: 'enhance'}; p.out = process(p); scanPages.push(p); taken++;
+      ui.querySelector('#lvCount').textContent = taken + ' page' + (taken > 1 ? 's' : '') + ' captured'; lastShot = quad; history = []; armedAt = null; busy = false;
+      hint.textContent = auto ? 'Captured. Turn to the next page, or tap Done.' : 'Captured.';
+    };
+    const loop = (t) => {
+      if (!alive) return;
+      if (video.videoWidth && (cv.width < 20 || Math.abs(parseFloat(cv.style.width) - cv.width / Math.min(2, devicePixelRatio || 1)) > 2)) fit();
+      if (video.videoWidth) {
+        g.drawImage(video, 0, 0, cv.width, cv.height);
+        if (t - last > 220 && !busy) { last = t; const qd = detectQuad(video, 300, true);
+          if (qd) { quad = quad && moved(qd, quad) < .03 ? quad.map((p, i) => [p[0] * .5 + qd[i][0] * .5, p[1] * .5 + qd[i][1] * .5]) : qd; history.push(quad); if (history.length > 8) history.shift(); }
+          else { quad = null; history = []; armedAt = null; if (lastShot) lastShot = null; }
+          const steady = quad && history.length >= 5 && history.every(hq => moved(hq, quad) < .015), fresh = !lastShot || (quad && moved(quad, lastShot) > .08);
+          if (!quad) hint.textContent = taken ? 'Point at the next page' : 'Point at the page';
+          else if (!fresh) hint.textContent = 'Turn to the next page, or tap Done';
+          else if (!steady) { hint.textContent = 'Hold steady…'; armedAt = null; }
+          else if (ui.querySelector('#lvAuto').checked) { armedAt = armedAt || t; hint.textContent = 'Capturing…'; if (t - armedAt > 500) shoot(true); }
+          else hint.textContent = 'Page found. Tap Capture.';
+        }
+        if (quad) { const s = cv.width / video.videoWidth; g.save(); g.lineWidth = 4 * Math.min(2, devicePixelRatio || 1); g.strokeStyle = '#3ddc84'; g.fillStyle = 'rgba(61,220,132,.18)'; g.beginPath(); quad.forEach(([x, y], i) => i ? g.lineTo(x * s, y * s) : g.moveTo(x * s, y * s)); g.closePath(); g.fill(); g.stroke(); g.restore(); }
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop); window.addEventListener('resize', fit);
+    const close = () => { alive = false; stream.getTracks().forEach(tr => tr.stop()); window.removeEventListener('resize', fit); ui.remove(); renderScan(); };
+    ui.addEventListener('click', e => { const a = e.target.closest('[data-a]'); if (!a) return; if (a.dataset.a === 'shot') shoot(false); if (a.dataset.a === 'done') close(); });
   }
 
   async function addFiles(files) {
@@ -1848,12 +1903,69 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     st.className = 'status'; st.textContent = ''; renderScan();
   }
 
-  /* find the paper: the largest bright area that stands out from a darker background */
-  function autoQuad(c) {
-    const k = 320 / Math.max(c.width, c.height), w = Math.round(c.width * k), hh = Math.round(c.height * k);
-    const s = document.createElement('canvas'); s.width = w; s.height = hh; const g = s.getContext('2d'); g.drawImage(c, 0, 0, w, hh);
-    const d = g.getImageData(0, 0, w, hh).data, gray = new Uint8Array(w * hh), hist = new Array(256).fill(0);
-    for (let i = 0; i < w * hh; i++) { const v = (d[i * 4] * .3 + d[i * 4 + 1] * .59 + d[i * 4 + 2] * .11) | 0; gray[i] = v; hist[v]++; }
+  /* Page finding, CamScanner style: look for the four straight edges of the paper (Hough lines on an
+     edge map) and, as a fallback, the largest bright area. Each candidate is scored by how much real edge
+     lies along its outline, and the best one wins. Works on a small copy, so it is fast enough for live video. */
+  function smallGray(c, maxSide) {
+    const k = Math.min(1, maxSide / Math.max(c.width || c.videoWidth, c.height || c.videoHeight)), w = Math.max(8, Math.round((c.width || c.videoWidth) * k)), hh = Math.max(8, Math.round((c.height || c.videoHeight) * k));
+    const s = document.createElement('canvas'); s.width = w; s.height = hh; const g = s.getContext('2d', {willReadFrequently: true}); g.drawImage(c, 0, 0, w, hh);
+    const d = g.getImageData(0, 0, w, hh).data, gray = new Float32Array(w * hh);
+    for (let i = 0; i < w * hh; i++) gray[i] = d[i * 4] * .3 + d[i * 4 + 1] * .59 + d[i * 4 + 2] * .11;
+    return {gray, w, h: hh, k};
+  }
+  function edgeMap(gray, w, hh) {
+    const b = new Float32Array(w * hh), t = new Float32Array(w * hh);
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let dx = -2; dx <= 2; dx++) { const xx = x + dx; if (xx >= 0 && xx < w) { s += gray[y * w + xx]; n++; } } t[y * w + x] = s / n; }
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let dy = -2; dy <= 2; dy++) { const yy = y + dy; if (yy >= 0 && yy < hh) { s += t[yy * w + x]; n++; } } b[y * w + x] = s / n; }
+    const mag = new Float32Array(w * hh); let mx = 0;
+    for (let y = 1; y < hh - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x, gx = b[i - w + 1] + 2 * b[i + 1] + b[i + w + 1] - b[i - w - 1] - 2 * b[i - 1] - b[i + w - 1], gy = b[i + w - 1] + 2 * b[i + w] + b[i + w + 1] - b[i - w - 1] - 2 * b[i - w] - b[i - w + 1];
+      mag[i] = Math.hypot(gx, gy); if (mag[i] > mx) mx = mag[i];
+    }
+    const bins = new Uint32Array(256), sc = 255 / (mx || 1); for (let i = 0; i < w * hh; i++) bins[Math.min(255, (mag[i] * sc) | 0)]++;
+    let acc8 = 0, bi8 = 255; while (bi8 > 0 && acc8 < w * hh * .08) acc8 += bins[bi8--];
+    const thr = Math.max(18, (bi8 + 1) / sc);
+    const e = new Uint8Array(w * hh); for (let i = 0; i < w * hh; i++) if (mag[i] >= thr) e[i] = 1;
+    const near = new Uint8Array(w * hh);
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) if (e[y * w + x]) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < hh && xx >= 0 && xx < w) near[yy * w + xx] = 1; }
+    return {e, near};
+  }
+  function support(quad, near, w, hh) {
+    let hit = 0, tot = 0;
+    for (let s = 0; s < 4; s++) { const [x0, y0] = quad[s], [x1, y1] = quad[(s + 1) % 4], n = Math.max(4, Math.round(Math.hypot(x1 - x0, y1 - y0) / 2));
+      for (let i = 0; i <= n; i++) { const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n); tot++; if (x >= 0 && y >= 0 && x < w && y < hh && near[y * w + x]) hit++; } }
+    return tot ? hit / tot : 0;
+  }
+  const areaOf = q => Math.abs(q.reduce((s, p, i) => { const r = q[(i + 1) % 4]; return s + p[0] * r[1] - r[0] * p[1]; }, 0)) / 2;
+  const convex = q => { let sign = 0; for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4], c = q[(i + 2) % 4], z = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]); if (Math.abs(z) < 1e-6) return false; if (!sign) sign = Math.sign(z); else if (Math.sign(z) !== sign) return false; } return true; };
+  function houghQuad(e, near, w, hh) {
+    const diag = Math.ceil(Math.hypot(w, hh)), R = 2 * diag + 1, T = 180, acc = new Int32Array(T * R), cs = [], sn = [];
+    for (let t = 0; t < T; t++) { cs.push(Math.cos(t * Math.PI / 180)); sn.push(Math.sin(t * Math.PI / 180)); }
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) if (e[y * w + x]) for (let t = 0; t < T; t++) acc[t * R + Math.round(x * cs[t] + y * sn[t]) + diag]++;
+    const lines = [], work = Int32Array.from(acc); let top = 0;
+    for (let k = 0; k < 24; k++) {
+      let bi = 0; for (let i = 1; i < work.length; i++) if (work[i] > work[bi]) bi = i;
+      const v = work[bi]; if (!k) top = v; if (v < Math.max(12, top * .2)) break;
+      const t = Math.floor(bi / R), r = bi % R - diag; lines.push({t, r, v});
+      for (let dt = -8; dt <= 8; dt++) for (let dr = -12; dr <= 12; dr++) { let tt = t + dt, rr = r + dr; if (tt < 0) { tt += T; rr = -rr; } if (tt >= T) { tt -= T; rr = -rr; } const j = tt * R + rr + diag; if (j >= 0 && j < work.length) work[j] = 0; }
+    }
+    const H = lines.filter(l => l.t >= 45 && l.t < 135).slice(0, 7), V = lines.filter(l => l.t < 45 || l.t >= 135).slice(0, 7);
+    const meet = (a, b) => { const d = cs[a.t] * sn[b.t] - sn[a.t] * cs[b.t]; if (Math.abs(d) < 1e-6) return null; return [(a.r * sn[b.t] - sn[a.t] * b.r) / d, (cs[a.t] * b.r - a.r * cs[b.t]) / d]; };
+    const yAt = l => (l.r - (w / 2) * cs[l.t]) / sn[l.t], xAt = l => (l.r - (hh / 2) * sn[l.t]) / cs[l.t];
+    let best = null;
+    for (let i = 0; i < H.length; i++) for (let j = i + 1; j < H.length; j++) for (let a = 0; a < V.length; a++) for (let b = a + 1; b < V.length; b++) {
+      let [t1, t2] = yAt(H[i]) < yAt(H[j]) ? [H[i], H[j]] : [H[j], H[i]], [l1, l2] = xAt(V[a]) < xAt(V[b]) ? [V[a], V[b]] : [V[b], V[a]];
+      const quad = [meet(t1, l1), meet(t1, l2), meet(t2, l2), meet(t2, l1)];
+      if (quad.some(p => !p || p[0] < -w * .04 || p[0] > w * 1.04 || p[1] < -hh * .04 || p[1] > hh * 1.04) || !convex(quad)) continue;
+      const area = areaOf(quad) / (w * hh); if (area < .035) continue;
+      const sp = support(quad, near, w, hh); if (sp < .5) continue;
+      const score = sp * (.55 + .45 * Math.min(1, area / .6));
+      if (!best || score > best.score) best = {quad, score};
+    }
+    return best;
+  }
+  function brightQuad(gray, w, hh) {
+    const hist = new Array(256).fill(0); for (let i = 0; i < w * hh; i++) hist[Math.min(255, gray[i] | 0)]++;
     let sum = 0, sumB = 0, wB = 0, best = 0, t = 128; for (let i = 0; i < 256; i++) sum += i * hist[i];
     for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = w * hh - wB; if (!wF) break; sumB += i * hist[i]; const mB = sumB / wB, mF = (sum - sumB) / wF, v = wB * wF * (mB - mF) ** 2; if (v > best) { best = v; t = i; } }
     const seen = new Uint8Array(w * hh); let bestComp = null;
@@ -1864,11 +1976,24 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
         for (const n of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < hh - 1 ? j + w : -1]) if (n >= 0 && !seen[n] && gray[n] > t) { seen[n] = 1; stack.push(n); } }
       if (!bestComp || comp.length > bestComp.length) bestComp = comp;
     }
-    if (!bestComp || bestComp.length < w * hh * .15 || bestComp.length > w * hh * .97) return null;
+    if (!bestComp || bestComp.length < w * hh * .035 || bestComp.length > w * hh * .97) return null;
     let tl, tr, br, bl, a = 1e9, b = -1e9, cc = -1e9, dd = 1e9;
     for (const j of bestComp) { const x = j % w, y = (j / w) | 0; if (x + y < a) { a = x + y; tl = [x, y]; } if (x + y > b) { b = x + y; br = [x, y]; } if (x - y > cc) { cc = x - y; tr = [x, y]; } if (x - y < dd) { dd = x - y; bl = [x, y]; } }
-    return [tl, tr, br, bl].map(([x, y]) => [x / k, y / k]);
+    return [tl, tr, br, bl];
   }
+  // returns corners in the source's own pixels, or null; maxSide trades accuracy for speed (live video uses less)
+  function detectQuad(c, maxSide, strict) {
+    const {gray, w, h: hh, k} = smallGray(c, maxSide || 480), {e, near} = edgeMap(gray, w, hh), cands = [];
+    const hq = houghQuad(e, near, w, hh); if (hq) cands.push(hq);
+    const bq = brightQuad(gray, w, hh); if (bq && convex(bq)) { const sp = support(bq, near, w, hh), area = areaOf(bq) / (w * hh); if (sp >= .45) cands.push({quad: bq, score: sp * (.55 + .45 * Math.min(1, area / .6)) * .95}); }
+    if (!cands.length) return null;
+    const best = cands.sort((a, b) => b.score - a.score)[0];
+    // live auto-capture must not fire on clutter: insist on a well-outlined page of a fair size
+    if (strict && (areaOf(best.quad) / (w * hh) < .1 || best.score < .62)) return null;
+    const W = (c.width || c.videoWidth), H = (c.height || c.videoHeight);
+    return best.quad.map(([x, y]) => [Math.max(0, Math.min(W, x / k)), Math.max(0, Math.min(H, y / k))]);
+  }
+  const autoQuad = c => detectQuad(c, 480);
   const fullQuad = c => [[0, 0], [c.width, 0], [c.width, c.height], [0, c.height]];
 
   function solve8(src, dst) {
@@ -1904,6 +2029,16 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     if (kind === 'original') return;
     const g = c.getContext('2d'), im = g.getImageData(0, 0, c.width, c.height), d = im.data, n = c.width * c.height;
     if (kind === 'enhance') {
+      // lighting estimate: shrink, erase text with a max filter, blur, enlarge
+      const W = c.width, H = c.height, sw = Math.max(8, Math.round(W / 8)), sh = Math.max(8, Math.round(H / 8));
+      let cur = c; while (cur.width / 2 > sw) { const t = document.createElement('canvas'); t.width = Math.max(sw, cur.width >> 1); t.height = Math.max(sh, cur.height >> 1); t.getContext('2d').drawImage(cur, 0, 0, t.width, t.height); cur = t; }
+      const sm = cur.getContext('2d').getImageData(0, 0, cur.width, cur.height), a = sm.data, bw = cur.width, bh = cur.height;
+      for (let pass = 0; pass < 3; pass++) { const src = Uint8ClampedArray.from(a); for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const i = (y * bw + x) * 4; for (let ch = 0; ch < 3; ch++) { let m = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = Math.min(bh - 1, Math.max(0, y + dy)), xx = Math.min(bw - 1, Math.max(0, x + dx)); m = Math.max(m, src[(yy * bw + xx) * 4 + ch]); } a[i + ch] = m; } } }
+      cur.getContext('2d').putImageData(sm, 0, 0);
+      const tiny = document.createElement('canvas'); tiny.width = Math.max(4, bw >> 2); tiny.height = Math.max(4, bh >> 2); tiny.getContext('2d').drawImage(cur, 0, 0, tiny.width, tiny.height);
+      const big = document.createElement('canvas'); big.width = W; big.height = H; const bg = big.getContext('2d'); bg.imageSmoothingQuality = 'high'; bg.drawImage(tiny, 0, 0, W, H);
+      const L = bg.getImageData(0, 0, W, H).data;
+      for (let i = 0; i < d.length; i += 4) for (let ch = 0; ch < 3; ch++) d[i + ch] = Math.min(255, d[i + ch] / Math.max(40, L[i + ch]) * 248);
       const hist = new Array(256).fill(0); for (let i = 0; i < n; i++) hist[(d[i * 4] * .3 + d[i * 4 + 1] * .59 + d[i * 4 + 2] * .11) | 0]++;
       let lo = 0, hi = 255, acc = 0; while (acc < n * .02 && lo < 254) acc += hist[lo++]; acc = 0; while (acc < n * .04 && hi > 1) acc += hist[hi--];
       // paper colour sets each channel's white (fixes yellow or blue light); ink level is capped so a mostly blank page is not over-stretched
