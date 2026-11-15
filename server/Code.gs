@@ -305,6 +305,7 @@ function ioHas(q, k) {
   return new RegExp('(^|[^a-z0-9])' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^a-z0-9])').test(q);
 }
 function ioCount(text, w) { var c = 0, i = text.indexOf(w); while (i >= 0 && c < 20) { c++; i = text.indexOf(w, i + w.length); } return c; }
+var IO_SOURCES = 20, IO_PER_DOC = 3, IO_MAX_CHARS = 45000; // how much the AI reads for each question
 function ioSearch(question, lib, max, main) {
   var terms = ioTerms(question, lib.syn), N = lib.chunks.length;
   if (!terms.length) return [];
@@ -325,9 +326,12 @@ function ioSearch(question, lib, max, main) {
     scored.push([s, i]);
   }
   scored.sort(function (a, b) { return b[0] - a[0]; });
-  var out = [], size = 0;
-  for (var j = 0; j < scored.length && out.length < (max || 10); j++) {
-    var ch = lib.chunks[scored[j][1]]; if (size + ch.x.length > 22000) continue;
+  // the best matches, at most IO_PER_DOC sections from any one document so more documents get a say
+  var out = [], size = 0, perDoc = {};
+  for (var j = 0; j < scored.length && out.length < (max || IO_SOURCES); j++) {
+    var ch = lib.chunks[scored[j][1]], doc = ch.s + '|' + String(ch.h).replace(/\s*\(p[\d–-]+\)$/, '');
+    if ((perDoc[doc] || 0) >= IO_PER_DOC || size + ch.x.length > IO_MAX_CHARS) continue;
+    perDoc[doc] = (perDoc[doc] || 0) + 1;
     out.push(ch); size += ch.x.length;
   }
   return out;
@@ -361,6 +365,7 @@ function ioPrompt(question, found, catalog, history, att) {
     '5. For anything about a specific client (their premium, underwriting decision, claim outcome), explain where the agent checks it, never guess the result. Never repeat personal data.',
     '6. Product or rule details: quote the document name and date from the source, and remind them to confirm with the latest PDF on ePartner. Do not give personalised financial advice.',
     '7. If unsure or the sources conflict, say so, set confidence "low", and suggest ICM (Home → Quick Links → Mailbox) or Agent Careline 03-4259 8111.',
+    '10. ACCURACY: read ALL the sources before answering, not just the first. Next to every rule, number, limit, form code or document requirement, name the GE document it comes from and its date, e.g. "(Guide - Policy Loan, 3 Mar)". If sources disagree, say so and prefer the one with the newest date. Never state a figure that is not in the sources.',
     'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
     '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
     '8. This may be a follow-up in a chat. Use the CONVERSATION SO FAR only to understand what the agent means (e.g. "that form", "how about SRM", "那个呢"). Facts must still come from the SOURCES, never from earlier answers alone. If the follow-up changes topic, just answer the new question.',
@@ -377,7 +382,7 @@ function ioAsk(q) {
   var history = ioHistory(q.history), att = ioAttachments(q), lib = ioLibrary();
   // search with the new question first, then the earlier questions (and the start of an attached PDF), so short follow-ups still find the right documents
   var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).concat(att.doc ? [att.doc.slice(0, 600)] : []).join(' ');
-  var found = ioSearch(searchText, lib, 10, question);
+  var found = ioSearch(searchText, lib, IO_SOURCES, question);
   var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att), images: att.images}, IO_MAX_IMAGES);
   return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
