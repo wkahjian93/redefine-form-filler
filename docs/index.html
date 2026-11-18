@@ -353,7 +353,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
       <div>
         <div class="eyebrow">Step 1</div>
         <h2>Choose a team form or add a new one</h2>
-        <p class="lede">Pick a form your team already uses, or upload a new blank PDF or photo. For a new form, the app finds every box and AI works out what goes in each one. Once it's filled and exported, it's saved here for every agent.</p>
+        <p class="lede">Pick a form your team already uses, or upload a new blank PDF or photo. For a new form, the app finds every box and AI works out what goes in each one. Once it's set up, the blank form is saved here for every agent to reuse.</p>
         <label class="drop" id="formDrop" tabindex="0" for="formFile"><strong>Upload a blank form</strong><span>Blank forms only: the whole team can see what you upload. PDF gives exact box positions. Photos work with approximate positions.</span></label>
         <input type="file" id="formFile" accept=".pdf,image/*" hidden>
         <div class="status" id="formStatus" style="margin-top:10px"></div>
@@ -1460,7 +1460,7 @@ function showInspector(s){
 }
 let saveT; function saveFormSoon(){ const f = form; clearTimeout(saveT); saveT = setTimeout(() => { if (f.kind === 'custom' && f.savedAt) FormStore.save(f); renderFormList(); }, 600); }
 
-/* saving: a form joins the team list the first time it's filled and exported */
+/* saving: a blank form joins the team list as soon as it's set up (export retries if that failed) */
 const baseName = f => S(f.name).replace(/\s*\(saved [^)]*\)(\s*#\d+)?$/, '').slice(0, 60);
 function autoName(){ const b = `${baseName(form)} (saved ${fmtSaved(Date.now())})`; let n = b, i = 2; while (forms.some(f => f.savedAt && f.name === n)) n = `${b} #${i++}`; return n; }
 function afterExport(){
@@ -1499,7 +1499,9 @@ async function onFormUpload(file){
     const m = await mapForm(det, file.name.replace(/\.[^.]+$/, ''));
     const f = {id:'f-' + uid(), kind:'custom', name:m.name, fields:m.fields, slots:det.slots, bytes:bytes.buffer.slice(0), pages:det.numPages, hash, dv:DETECT_V, looksFilled:!!m.looksFilled};
     forms.splice(1, 0, f); await selectForm(f.id);
-    st.className = 'status'; st.textContent = `Ready: ${f.slots.filter(s => s.key).length} of ${f.slots.length} boxes mapped to ${f.fields.length} fields. Check the layout on the right, then continue. ${f.looksFilled ? 'This form seems to contain personal details, so it won’t be shared with the team.' : 'After your first export it is saved for the whole team.'}`;
+    // a blank form is kept for the team straight away, so the next agent can reuse it
+    if (!f.looksFilled && form === f) await saveForTeam();
+    st.className = 'status'; st.textContent = `Ready: ${f.slots.filter(s => s.key).length} of ${f.slots.length} boxes mapped to ${f.fields.length} fields. Check the layout on the right, then continue. ${f.looksFilled ? 'This form seems to contain personal details, so it isn’t shared with the team. If it is blank, use “It is blank, save for the team”.' : f.savedAt ? `Saved for the whole team as ${f.name}.` : 'It could not be saved yet. It will be saved after your first export.'}`;
   } catch(e){ st.className = 'status'; st.textContent = e && e.code ? aiMsg(e) : (e.message || String(e)); }
 }
 let remapping = false;
