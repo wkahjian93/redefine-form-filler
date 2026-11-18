@@ -129,6 +129,8 @@
   };
 
   const parts = {sample, user, downloads, db: {collection}};
+  // PDF tools' Convert talks to the team server directly
+  window.__rffServer = async (body) => { await gate(); return post(body); };
   window.claude = {use: async n => { await gate(); return parts[n] || null; }};
 
   /* sign out, placed in the agent settings dialog */

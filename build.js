@@ -37,7 +37,9 @@ const head = `<!doctype html>
 `;
 // Scan & sign and My profile: a separate module that runs after the page's own script
 const tools = fs.readFileSync(here('app', 'tools.js'), 'utf8');
-const html = head + page + '\n<script>' + tools + '</script>' + '\n<script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));</script>\n</body></html>\n';
+// PDF tools (merge, split, convert…) builds on the editor that tools.js shares through window.__rff
+const pdftools = fs.readFileSync(here('app', 'pdftools.js'), 'utf8');
+const html = head + page + '\n<script>' + tools + '</script>' + '\n<script>' + pdftools + '</script>' + '\n<script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js"));</script>\n</body></html>\n';
 
 const out = here('docs');
 fs.mkdirSync(path.join(out, 'icons'), {recursive: true});

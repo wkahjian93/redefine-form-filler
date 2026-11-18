@@ -19,7 +19,7 @@
   /* ---------------- styles ---------------- */
   document.head.appendChild(h(`<style>
   .modes{display:flex;gap:6px;padding:12px 0 0;flex-wrap:wrap}
-  .modes button{flex:1 1 0;min-width:100px;border:1.5px solid var(--rule);background:var(--sheet);border-radius:10px;padding:10px 8px;font-weight:600;font-size:14px;cursor:pointer;color:var(--ink)}
+  .modes button{flex:1 1 0;min-width:0;border:1.5px solid var(--rule);background:var(--sheet);border-radius:10px;padding:10px 8px;font-weight:600;font-size:14px;cursor:pointer;color:var(--ink)}
   .modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
   .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;margin-top:14px}
   .thumb{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px}
@@ -66,16 +66,17 @@
   .mebar .chip{border:1px solid var(--rule);background:var(--sheet);border-radius:999px;padding:5px 11px;font-size:13px;cursor:pointer;color:var(--ink)}
   .result{display:flex;flex-direction:column;gap:10px}
   .result .big{width:100%;padding:13px;font-size:15px}
-  @media (max-width:760px){.modes button{font-size:13px;padding:9px 6px}}
+  @media (max-width:760px){.modes{gap:4px}.modes button{font-size:12.5px;padding:9px 2px;white-space:nowrap}}
   </style>`));
 
   /* ---------------- layout: three modes ---------------- */
   const mast = q('.mast'), steps = q('.steps');
-  const modes = h(`<nav class="modes" aria-label="Sections"><button data-m="fill" aria-pressed="true">Fill forms</button><button data-m="scan" aria-pressed="false">Scan &amp; sign</button><button data-m="profile" aria-pressed="false">My profile</button></nav>`);
+  const modes = h(`<nav class="modes" aria-label="Sections"><button data-m="fill" aria-pressed="true">Fill forms</button><button data-m="scan" aria-pressed="false">Scan &amp; sign</button><button data-m="tools" aria-pressed="false">PDF tools</button><button data-m="profile" aria-pressed="false">My profile</button></nav>`);
   mast.after(modes);
   const wrap = q('.wrap');
   const pScan = h(`<section class="panel" id="pScan"></section>`), pProfile = h(`<section class="panel" id="pProfile"></section>`);
-  wrap.appendChild(pScan); wrap.appendChild(pProfile);
+  const pTools = h(`<section class="panel" id="pTools"></section>`);
+  wrap.appendChild(pScan); wrap.appendChild(pTools); wrap.appendChild(pProfile);
   let mode = 'fill', fillStep = 1;
   const origGo = go;
   function setMode(m) {
@@ -83,13 +84,14 @@
     modes.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === m)));
     steps.hidden = m !== 'fill';
     [1, 2, 3].forEach(i => q('#p' + i).classList.toggle('on', m === 'fill' && i === fillStep));
-    pScan.classList.toggle('on', m === 'scan'); pProfile.classList.toggle('on', m === 'profile');
+    pScan.classList.toggle('on', m === 'scan'); pProfile.classList.toggle('on', m === 'profile'); pTools.classList.toggle('on', m === 'tools');
     if (m === 'profile') renderProfile();
     if (m === 'scan') renderScan();
+    if (m === 'tools') { if (doc && doc.back === 'tools' && view === 'markup') renderMarkup(); else if (!(doc && doc.back === 'tools' && view === 'result') && window.__rffTools) window.__rffTools.render(pTools); }
     if (m === 'fill') origGo(fillStep);
     window.scrollTo({top: 0});
   }
-  go = function (n) { fillStep = n; if (mode !== 'fill') { mode = 'fill'; modes.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === 'fill'))); steps.hidden = false; pScan.classList.remove('on'); pProfile.classList.remove('on'); } origGo(n); };
+  go = function (n) { fillStep = n; if (mode !== 'fill') { mode = 'fill'; modes.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === 'fill'))); steps.hidden = false; pScan.classList.remove('on'); pProfile.classList.remove('on'); pTools.classList.remove('on'); } origGo(n); };
   modes.addEventListener('click', e => { const b = e.target.closest('button[data-m]'); if (b) setMode(b.dataset.m); });
 
   /* ---------------- My profile ---------------- */
@@ -171,8 +173,8 @@
   let view = 'pages';
 
   function renderScan() {
-    if (view === 'markup') return renderMarkup();
-    if (view === 'result') return;
+    if (doc && doc.back === 'tools') { if (view !== 'pages') return; }
+    else { if (view === 'markup') return renderMarkup(); if (view === 'result') return; }
     pScan.innerHTML = `
       <div class="eyebrow">Scan &amp; sign</div><h2>Scan a document</h2>
       <p class="lede">Snap an IC, receipt or any paper. The camera stays open so you can take page after page. Then tap Adjust on each page to crop it, add text, your signature or a watermark, and send it as a PDF. Scans stay on this phone until you send them.</p>
@@ -501,16 +503,22 @@
       const pdf = await pdfjsLib.getDocument({data: d.pdf.slice(), isEvalSupported: false}).promise; d.pages = [];
       for (let i = 1; i <= pdf.numPages; i++) { const pg = await pdf.getPage(i), vp = pg.getViewport({scale: 1}); d.pages.push({kind: 'pdf', index: i - 1, w: vp.width, h: vp.height, pg}); }
     }
-    doc = d; objs = []; selId = null; view = 'markup';
-    if (mode !== 'scan') { mode = 'scan'; modes.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === 'scan'))); steps.hidden = true; [1, 2, 3].forEach(i => q('#p' + i).classList.remove('on')); pProfile.classList.remove('on'); pScan.classList.add('on'); }
+    doc = d; objs = []; selId = null; view = 'markup'; watermark.on = !!d.watermark;
+    const want = d.back === 'tools' ? 'tools' : 'scan';
+    if (mode !== want) { mode = want; modes.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.m === want))); steps.hidden = true; [1, 2, 3].forEach(i => q('#p' + i).classList.remove('on')); pProfile.classList.remove('on'); pScan.classList.toggle('on', want === 'scan'); pTools.classList.toggle('on', want === 'tools'); }
     renderMarkup(); window.scrollTo({top: 0});
   }
   let activePage = 0;
+  const mkHost = () => doc && doc.back === 'tools' ? pTools : pScan;
   function renderMarkup() {
-    pScan.innerHTML = `
+    const host0 = mkHost(), other = host0 === pScan ? pTools : pScan;
+    if (other.querySelector('#mkPages, #resName')) other.innerHTML = '';
+    host0.innerHTML = `
       <div class="mk-tools">
-        <div class="row" style="justify-content:space-between"><button class="btn ghost sm" id="mkBack">← ${doc.back === 'fill' ? 'Back to form' : 'Back to pages'}</button><button class="btn primary" id="mkDone">Finish &amp; send</button></div>
+        <div class="row" style="justify-content:space-between"><button class="btn ghost sm" id="mkBack">← ${doc.back === 'fill' ? 'Back to form' : doc.back === 'tools' ? 'Back to PDF tools' : 'Back to pages'}</button><button class="btn primary" id="mkDone">Finish &amp; send</button></div>
         <div class="row"><button class="btn sm" id="mkText">＋ Text</button><button class="btn sm" id="mkMe">＋ My details</button><button class="btn sm" id="mkSig">＋ Signature</button><button class="btn sm" id="mkDate">＋ Date</button><button class="btn sm" id="mkWm" aria-pressed="${watermark.on}">Watermark</button></div>
+        <div class="row"><label class="btn sm" for="mkImgFile">＋ Image</label><input type="file" id="mkImgFile" accept="image/*" hidden><button class="btn sm" id="mkShape">＋ Shape</button><button class="btn sm" id="mkNote">＋ Note</button><button class="btn sm" id="mkField">＋ Form field</button></div>
+        ${doc.hint ? `<p class="note" style="margin:0">${escH(doc.hint)}</p>` : ''}
         <div id="mkPanel"></div>
       </div>
       <div class="mk-pages" id="mkPages"></div>`;
@@ -525,7 +533,11 @@
       host.appendChild(el);
     });
     drawWatermarks(); drawObjs(); panel();
-    q('#mkBack').onclick = () => { view = 'pages'; if (doc.back === 'fill') { doc = null; go(3); } else renderScan(); };
+    q('#mkBack').onclick = () => { view = 'pages'; if (doc.back === 'fill') { doc = null; go(3); } else if (doc.back === 'tools') { doc = null; objs = []; window.__rffTools.render(pTools); } else renderScan(); };
+    q('#mkImgFile').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const im = await imageData(f); addObj({type: 'img', src: im.src, w: .3, ar: im.ar}); } catch (err) { say('That picture could not be opened. Try a JPG or PNG.'); } };
+    q('#mkShape').onclick = e => popMenu(e.currentTarget, [['rect', 'Rectangle'], ['ellipse', 'Circle'], ['line', 'Line'], ['arrow', 'Arrow'], ['highlight', 'Highlight']].map(([k, l]) => ({label: l, run: () => addObj({type: 'shape', kind: k, w: k === 'line' || k === 'arrow' ? .25 : .22, h: k === 'line' || k === 'arrow' ? .06 : k === 'highlight' ? .025 : .08, color: k === 'highlight' ? '#f7d000' : '#c62f3b', x: .3, y: .45})})));
+    q('#mkNote').onclick = () => addObj({type: 'text', note: true, text: 'Note', size: .022, color: '#3a2a00'});
+    q('#mkField').onclick = e => popMenu(e.currentTarget, [['text', 'Text box'], ['check', 'Tick box'], ['choice', 'Drop-down choice'], ['sign', 'Signature box (for the client)'], ['date', 'Date box']].map(([k, l]) => ({label: l, run: () => { fieldN++; addObj({type: 'field', ft: k, name: {text: 'Text', check: 'Tick', choice: 'Choice', sign: 'Signature', date: 'Date'}[k] + ' ' + fieldN, options: k === 'choice' ? 'Yes, No' : '', w: k === 'check' ? .03 : k === 'sign' ? .3 : .26, h: k === 'check' ? .021 : k === 'sign' ? .06 : .028, x: .3, y: .45}); }})));
     q('#mkText').onclick = () => addObj({type: 'text', text: 'Type here', size: .028, color: '#0a1a4a'});
     q('#mkDate').onclick = () => addObj({type: 'text', text: today(), size: .024, color: '#0a1a4a'});
     q('#mkSig').onclick = () => { if (!profile.signature) { say('Save your signature in My profile first.'); return setMode('profile'); } const im = new Image(); im.onload = () => addObj({type: 'img', src: profile.signature, w: .26, ar: im.height / im.width}); im.src = profile.signature; };
@@ -538,19 +550,43 @@
     pages.forEach((el, i) => { const r = el.getBoundingClientRect(), v = Math.min(innerHeight, r.bottom) - Math.max(0, r.top); if (v > bestV) { bestV = v; best = i; } });
     return best;
   }
+  let fieldN = 0;
+  async function imageData(f) {
+    const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const png = /png|gif|webp|svg/i.test(f.type); return {src: c.toDataURL(png ? 'image/png' : 'image/jpeg', .88), ar: c.height / c.width};
+  }
+  const SHAPE_SVG = (o) => { const sw = o.kind === 'highlight' ? 0 : 3, c = o.color;
+    if (o.kind === 'rect') return `<rect x="2" y="2" width="96" height="96" fill="none" stroke="${c}" stroke-width="${sw}" vector-effect="non-scaling-stroke"/>`;
+    if (o.kind === 'ellipse') return `<ellipse cx="50" cy="50" rx="48" ry="48" fill="none" stroke="${c}" stroke-width="${sw}" vector-effect="non-scaling-stroke"/>`;
+    if (o.kind === 'highlight') return `<rect x="0" y="0" width="100" height="100" fill="${c}" fill-opacity=".38"/>`;
+    const [x1, y1, x2, y2] = o.flip ? [2, 98, 98, 2] : [2, 2, 98, 98];
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="3" vector-effect="non-scaling-stroke"/>` + (o.kind === 'arrow' ? `<circle cx="${x2}" cy="${y2}" r="3.5" fill="${c}"/>` : ''); };
+  function shapePng(o, wPt, hPt) {
+    const k = 3, W = Math.max(4, Math.round(wPt * k)), H = Math.max(4, Math.round(hPt * k)), c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), lw = 1.6 * k;
+    g.strokeStyle = g.fillStyle = o.color; g.lineWidth = lw; g.lineCap = 'round';
+    if (o.kind === 'rect') g.strokeRect(lw / 2, lw / 2, W - lw, H - lw);
+    else if (o.kind === 'ellipse') { g.beginPath(); g.ellipse(W / 2, H / 2, Math.max(1, W / 2 - lw), Math.max(1, H / 2 - lw), 0, 0, 7); g.stroke(); }
+    else if (o.kind === 'highlight') { g.globalAlpha = .38; g.fillRect(0, 0, W, H); }
+    else { const [x1, y1, x2, y2] = o.flip ? [lw, H - lw, W - lw, lw] : [lw, lw, W - lw, H - lw]; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      if (o.kind === 'arrow') { const a = Math.atan2(y2 - y1, x2 - x1), L = 7 * k; g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - L * Math.cos(a - .45), y2 - L * Math.sin(a - .45)); g.lineTo(x2 - L * Math.cos(a + .45), y2 - L * Math.sin(a + .45)); g.closePath(); g.fill(); } }
+    return c.toDataURL('image/png');
+  }
   function addObj(o) { const pg = visiblePage(); const ob = Object.assign({id: uidT(), page: pg, x: .3, y: .45}, o); objs.push(ob); selId = ob.id; drawObjs(); panel(); }
   function drawObjs() {
     document.querySelectorAll('.mk-o').forEach(n => n.remove());
     objs.forEach(o => {
       const page = document.querySelector(`.mk-page[data-i="${o.page}"]`); if (!page) return;
       const pw = page.clientWidth, el = document.createElement('div'); el.className = 'mk-o' + (o.id === selId ? ' sel' : ''); el.style.left = o.x * 100 + '%'; el.style.top = o.y * 100 + '%';
-      if (o.type === 'text') { el.textContent = o.text; el.style.fontSize = o.size * pw + 'px'; el.style.color = o.color; el.style.fontFamily = 'var(--f-ui)'; }
-      else { el.style.width = o.w * 100 + '%'; const im = new Image(); im.src = o.src; im.alt = 'Signature'; el.appendChild(im); }
+      if (o.type === 'text') { el.textContent = o.text; el.style.fontSize = o.size * pw + 'px'; el.style.color = o.color; el.style.fontFamily = 'var(--f-ui)'; if (o.note) { el.style.background = '#fff3a0'; el.style.padding = '.3em .5em'; el.style.borderRadius = '3px'; el.style.boxShadow = '0 1px 3px rgba(0,0,0,.25)'; } }
+      else if (o.type === 'shape') { el.style.width = o.w * 100 + '%'; el.style.height = o.h * 100 + '%'; el.style.padding = '0'; el.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="width:100%;height:100%;display:block;overflow:visible">${SHAPE_SVG(o)}</svg>`; }
+      else if (o.type === 'field') { el.style.width = o.w * 100 + '%'; el.style.height = o.h * 100 + '%'; el.style.padding = '0'; el.style.border = '1.5px dashed #1f3f9a'; el.style.background = 'rgba(31,63,154,.08)'; el.style.font = `600 ${Math.max(9, .012 * pw)}px var(--f-ui)`; el.style.color = '#1f3f9a'; el.style.overflow = 'hidden'; el.textContent = o.ft === 'check' ? '' : (o.ft === 'sign' ? '✍ ' : '') + o.name; }
+      else { el.style.width = o.w * 100 + '%'; const im = new Image(); im.src = o.src; im.alt = 'Picture'; el.appendChild(im); }
       const rz = document.createElement('span'); rz.className = 'rz'; el.appendChild(rz);
       let st = null;
-      el.onpointerdown = e => { e.stopPropagation(); cap(el, e); const r = page.getBoundingClientRect(); st = {mx: e.clientX, my: e.clientY, x: o.x, y: o.y, size: o.size, w: o.w, rz: e.target === rz, pw: r.width, ph: r.height, moved: false, picked: selId !== o.id}; if (st.picked) { selId = o.id; document.querySelectorAll('.mk-o').forEach(n => n.classList.remove('sel')); el.classList.add('sel'); } };
+      el.onpointerdown = e => { e.stopPropagation(); cap(el, e); const r = page.getBoundingClientRect(); st = {mx: e.clientX, my: e.clientY, x: o.x, y: o.y, size: o.size, w: o.w, h: o.h, rz: e.target === rz, pw: r.width, ph: r.height, moved: false, picked: selId !== o.id}; if (st.picked) { selId = o.id; document.querySelectorAll('.mk-o').forEach(n => n.classList.remove('sel')); el.classList.add('sel'); } };
       el.onpointermove = e => { if (!st) return; const dx = (e.clientX - st.mx) / st.pw, dy = (e.clientY - st.my) / st.ph; st.moved = true;
-        if (st.rz) { const f = Math.max(.25, 1 + dx * 3); if (o.type === 'text') { o.size = Math.max(.008, Math.min(.2, st.size * f)); el.style.fontSize = o.size * st.pw + 'px'; } else { o.w = Math.max(.04, Math.min(1, st.w * f)); el.style.width = o.w * 100 + '%'; } }
+        if (st.rz && (o.type === 'shape' || o.type === 'field')) { o.w = Math.max(.015, Math.min(1, st.w + dx)); o.h = Math.max(.008, Math.min(1, st.h + dy)); el.style.width = o.w * 100 + '%'; el.style.height = o.h * 100 + '%'; }
+        else if (st.rz) { const f = Math.max(.25, 1 + dx * 3); if (o.type === 'text') { o.size = Math.max(.008, Math.min(.2, st.size * f)); el.style.fontSize = o.size * st.pw + 'px'; } else { o.w = Math.max(.04, Math.min(1, st.w * f)); el.style.width = o.w * 100 + '%'; } }
         else { o.x = Math.max(-.05, Math.min(.98, st.x + dx)); o.y = Math.max(-.02, Math.min(.98, st.y + dy)); el.style.left = o.x * 100 + '%'; el.style.top = o.y * 100 + '%'; } };
       // the edit panel changes height, so swap it only after the finger lifts or the page would jump mid-drag
       el.onpointerup = el.onpointercancel = () => { const picked = st && st.picked; st = null; if (picked) panel(); };
@@ -572,6 +608,18 @@
     }
     const o = objs.find(x => x.id === selId);
     if (!o) { box.innerHTML = `<p class="note" style="margin:0">Tap something on the page to edit it. Drag to move it; drag the red dot to resize.${watermark.on ? ' <button class="btn ghost sm" id="wmEdit">Edit watermark</button>' : ''}</p>`; if (q('#wmEdit')) q('#wmEdit').onclick = () => { selId = 'wm'; panel(); }; return; }
+    if (o.type === 'shape' || o.type === 'field') {
+      box.innerHTML = `<div class="mk-panel">${o.type === 'shape' ? `<div class="row">${(o.kind === 'highlight' ? ['#f7d000', '#7ee081', '#7cc4ff', '#ff9ec7'] : ['#c62f3b', '#1f3f9a', '#000000', '#137a4b']).map(c => `<button class="swatch" data-c="${c}" style="background:${c}" aria-label="Colour" aria-pressed="${o.color === c}"></button>`).join('')}${o.kind === 'line' || o.kind === 'arrow' ? '<button class="btn sm" id="obFlip">Flip direction</button>' : ''}</div>`
+        : `<div class="fg"><div class="f"><label for="fdName">Field name</label><input id="fdName" value="${escH(o.name)}"></div>${o.ft === 'choice' ? `<div class="f wide"><label for="fdOpts">Choices, separated by commas</label><input id="fdOpts" value="${escH(o.options)}"></div>` : ''}</div><p class="note" style="margin:0">The person you send this PDF to can fill this in with their phone's PDF viewer.</p>`}
+        <div class="row"><button class="btn sm" id="obDup">Copy</button><button class="btn ghost sm" id="obDel">Delete</button><span class="note">Drag the red dot to resize.</span></div></div>`;
+      box.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { o.color = b.dataset.c; box.querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); drawObjs(); });
+      if (q('#obFlip')) q('#obFlip').onclick = () => { o.flip = !o.flip; drawObjs(); };
+      if (q('#fdName')) q('#fdName').oninput = e => { o.name = e.target.value; drawObjs(); };
+      if (q('#fdOpts')) q('#fdOpts').oninput = e => { o.options = e.target.value; };
+      q('#obDup').onclick = () => { const c = Object.assign({}, o, {id: uidT(), y: Math.min(.95, o.y + .04)}); if (c.type === 'field') { fieldN++; c.name = o.name.replace(/\s*\d*$/, '') + ' ' + fieldN; } objs.push(c); selId = c.id; drawObjs(); panel(); };
+      q('#obDel').onclick = () => { objs = objs.filter(x => x !== o); selId = null; drawObjs(); panel(); };
+      return;
+    }
     box.innerHTML = `<div class="mk-panel">${o.type === 'text' ? `<textarea id="obText" aria-label="Text">${escH(o.text)}</textarea><div class="row">${['#0a1a4a', '#000000', '#c62f3b', '#1f3f9a'].map(c => `<button class="swatch" data-c="${c}" style="background:${c}" aria-label="Colour" aria-pressed="${o.color === c}"></button>`).join('')}<button class="btn sm" data-z="-1" aria-label="Smaller">A−</button><button class="btn sm" data-z="1" aria-label="Bigger">A＋</button>` : '<div class="row"><button class="btn sm" data-z="-1">Smaller</button><button class="btn sm" data-z="1">Bigger</button>'}
       <button class="btn sm" id="obDup">Copy</button><button class="btn ghost sm" id="obDel">Delete</button></div></div>`;
     if (q('#obText')) q('#obText').oninput = e => { o.text = e.target.value; drawObjs(); };
@@ -592,7 +640,7 @@
   function drawWatermarks() {
     document.querySelectorAll('.mk-page').forEach(el => { const c = el.querySelector('canvas.wm'), k = Math.min(2, devicePixelRatio || 1); c.width = el.clientWidth * k; c.height = el.clientHeight * k; const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height); paintWatermark(g, c.width, c.height); });
   }
-  window.addEventListener('resize', () => { if (view === 'markup' && mode === 'scan') { drawObjs(); drawWatermarks(); } });
+  window.addEventListener('resize', () => { if (view === 'markup') { drawObjs(); drawWatermarks(); } });
 
   function popMenu(anchor, items, empty) {
     document.querySelectorAll('.menu-pop').forEach(m => m.remove());
@@ -608,6 +656,7 @@
     const k = 3, fs = o.size * wPt * k, c = document.createElement('canvas'), g = c.getContext('2d'), font = `${fs}px "Public Sans", system-ui, sans-serif`;
     g.font = font; const lines = o.text.split('\n'), tw = Math.max(1, ...lines.map(l => g.measureText(l).width)), lh = fs * 1.2;
     c.width = Math.ceil(tw + fs * .3); c.height = Math.ceil(lines.length * lh + fs * .2); g.font = font; g.fillStyle = o.color; g.textBaseline = 'top';
+    if (o.note) { const pad = fs * .4; const c2 = document.createElement('canvas'); c2.width = c.width + pad * 2; c2.height = c.height + pad * 2; const g2 = c2.getContext('2d'); g2.fillStyle = '#fff3a0'; g2.fillRect(0, 0, c2.width, c2.height); g2.font = font; g2.fillStyle = o.color; g2.textBaseline = 'top'; lines.forEach((l, i) => g2.fillText(l, pad + fs * .15, pad + i * lh + fs * .1)); return {png: c2.toDataURL('image/png'), w: c2.width / k, h: c2.height / k}; }
     lines.forEach((l, i) => g.fillText(l, fs * .15, i * lh + fs * .1)); return {png: c.toDataURL('image/png'), w: c.width / k, h: c.height / k};
   }
   async function buildPdf() {
@@ -620,7 +669,16 @@
       if (watermark.on) { const c = document.createElement('canvas'); c.width = Math.round(W * 2); c.height = Math.round(H * 2); paintWatermark(c.getContext('2d'), c.width, c.height); const im = await out.embedPng(c.toDataURL('image/png')); page.drawImage(im, {x: 0, y: 0, width: W, height: H}); }
       for (const o of objs.filter(x => x.page === i)) {
         if (o.type === 'text') { const t = textPng(o, W), im = await out.embedPng(t.png); page.drawImage(im, {x: o.x * W, y: H - o.y * H - t.h, width: t.w, height: t.h}); }
-        else { const im = await out.embedPng(o.src), w = o.w * W, hh = w * o.ar; page.drawImage(im, {x: o.x * W, y: H - o.y * H - hh, width: w, height: hh}); }
+        else if (o.type === 'shape') { const w = o.w * W, hh = o.h * H, im = await out.embedPng(shapePng(o, w, hh)); page.drawImage(im, {x: o.x * W, y: H - o.y * H - hh, width: w, height: hh}); }
+        else if (o.type === 'field') {
+          const form = out.getForm(), w = o.w * W, hh = o.h * H, x = o.x * W, y = H - o.y * H - hh, used = new Set(form.getFields().map(f => f.getName()));
+          let name = (o.name || 'Field').replace(/[.]/g, ' ').trim() || 'Field', n = 2; while (used.has(name)) name = (o.name || 'Field') + ' ' + n++;
+          const look = {x, y, width: w, height: hh, borderColor: PDFLib.rgb(.12, .25, .6), borderWidth: 1};
+          if (o.ft === 'check') form.createCheckBox(name).addToPage(page, look);
+          else if (o.ft === 'choice') { const dd = form.createDropdown(name); const opts = (o.options || '').split(',').map(s => s.trim()).filter(Boolean); if (opts.length) dd.addOptions(opts); dd.addToPage(page, look); }
+          else { const tf = form.createTextField(name); tf.addToPage(page, look); if (o.ft === 'sign' || o.ft === 'date') { const font = await out.embedFont(PDFLib.StandardFonts.Helvetica); page.drawText(o.ft === 'sign' ? 'Sign here' : 'Date', {x: x + 2, y: y + hh + 2, size: Math.min(9, Math.max(6, hh * .3)), font, color: PDFLib.rgb(.12, .25, .6)}); } }
+        }
+        else { const im = o.src.startsWith('data:image/jpeg') ? await out.embedJpg(o.src) : await out.embedPng(o.src), w = o.w * W, hh = w * o.ar; page.drawImage(im, {x: o.x * W, y: H - o.y * H - hh, width: w, height: hh}); }
       }
     }
     return out.save();
@@ -628,26 +686,37 @@
   async function finish() {
     const btn = q('#mkDone'); btn.disabled = true; btn.textContent = 'Making PDF…';
     let bytes; try { bytes = await buildPdf(); } catch (e) { console.error(e); btn.disabled = false; btn.textContent = 'Finish & send'; return say('Could not make the PDF. Try again.'); }
-    view = 'result';
-    const base = (doc.name || 'Document').replace(/\.pdf$/i, '').replace(/[^\w\- ]+/g, '_');
-    pScan.innerHTML = `<div class="eyebrow">Ready</div><h2>Your PDF is ready</h2>
+    if (doc.after) { try { bytes = await doc.after(bytes); } catch (e) { console.error(e); btn.disabled = false; btn.textContent = 'Finish & send'; return say(e.message || 'Could not make the PDF.'); } }
+    showResult(bytes, {name: doc.name, back: doc.back, pages: doc.pages.length, editable: true});
+  }
+  /* finished file: send through the share sheet or download. Used by the editor and by every PDF tool. */
+  function showResult(bytes, opt) {
+    opt = opt || {}; view = 'result';
+    const ext = opt.ext || 'pdf', mime = opt.mime || 'application/pdf';
+    const base = (opt.name || 'Document').replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[^\w\- ]+/g, '_');
+    const host = opt.back === 'tools' ? pTools : pScan;
+    if (host === pTools && pScan.querySelector('#mkPages, #resName')) pScan.innerHTML = '';
+    if (!doc) doc = {back: opt.back, pages: []};
+    host.innerHTML = `<div class="eyebrow">Ready</div><h2>${ext === 'pdf' ? 'Your PDF is ready' : 'Your file is ready'}</h2>
       <div class="card result" style="max-width:520px;margin-top:14px">
         <div class="f"><label for="resName">File name</label><input id="resName" value="${escH(base)}"></div>
         <p class="note" id="resSize" style="margin:0"></p>
         <button class="btn primary big" id="resShare">Send to WhatsApp, email or Google Drive</button>
         <button class="btn big" id="resDl">Download / save to Files</button>
         <p class="note" id="resHelp" style="margin:0"></p>
-        <div class="row" style="justify-content:space-between"><button class="btn ghost sm" id="resEdit">← Keep editing</button><button class="btn ghost sm" id="resNew">${doc.back === 'fill' ? 'Back to forms' : 'Scan something new'}</button></div>
+        <div class="row" style="justify-content:space-between"><button class="btn ghost sm" id="resEdit">← Keep editing</button><button class="btn ghost sm" id="resNew">${opt.back === 'fill' ? 'Back to forms' : opt.back === 'tools' ? 'Back to PDF tools' : 'Scan something new'}</button></div>
       </div>`;
-    const file = () => new File([bytes], (q('#resName').value.trim() || base).replace(/[\\/:*?"<>|]+/g, '_') + '.pdf', {type: 'application/pdf'});
-    q('#resSize').textContent = `${doc.pages.length} page${doc.pages.length > 1 ? 's' : ''} · ${(bytes.length / 1024 / 1024).toFixed(1)} MB`;
+    const file = () => new File([bytes], (q('#resName').value.trim() || base).replace(/[\\/:*?"<>|]+/g, '_') + '.' + ext, {type: mime});
+    const size = bytes.size || bytes.length || bytes.byteLength || 0;
+    q('#resSize').textContent = (opt.pages ? `${opt.pages} page${opt.pages > 1 ? 's' : ''} · ` : '') + (size / 1024 / 1024 < .1 ? Math.max(1, Math.round(size / 1024)) + ' KB' : (size / 1024 / 1024).toFixed(1) + ' MB') + (opt.note ? ' · ' + opt.note : '');
+    if (!opt.editable) q('#resEdit').hidden = true;
     const share = canShareFile(file());
     q('#resHelp').textContent = share ? 'Send opens your phone’s share menu: pick WhatsApp, Mail, Gmail or Drive. To keep a copy, choose Save to Files or Download.' : 'This computer can’t send files directly. Download the PDF, then attach it in WhatsApp Web or your email, or drag it into Google Drive.';
     q('#resShare').onclick = async () => { const f = file(); if (!canShareFile(f)) { downloadFile(f); return; } try { await navigator.share({files: [f], title: f.name}); } catch (e) { if (e.name !== 'AbortError') downloadFile(f); } };
     if (!share) q('#resShare').textContent = 'Download, then attach';
     q('#resDl').onclick = () => downloadFile(file());
     q('#resEdit').onclick = () => { view = 'markup'; renderMarkup(); };
-    q('#resNew').onclick = () => { const back = doc.back; doc = null; objs = []; view = 'pages'; if (back === 'fill') go(3); else { scanPages = []; renderScan(); } };
+    q('#resNew').onclick = () => { const back = opt.back; doc = null; objs = []; view = 'pages'; if (back === 'fill') go(3); else if (back === 'tools') window.__rffTools.render(pTools); else { scanPages = []; renderScan(); } };
   }
 
   /* ---------------- form filling: sign the filled form, insert my details ---------------- */
@@ -666,4 +735,5 @@
     const g = meBar.querySelector('[data-go]'); if (g) g.onclick = () => setMode('profile');
   }
   renderMeBar();
+  window.__rff = {openMarkup, showResult, downloadFile, canShareFile, say, h, escH, today, uidT, cap, setMode, profile: () => profile, mode: () => mode};
 })();

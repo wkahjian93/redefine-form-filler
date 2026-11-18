@@ -61,6 +61,7 @@ function handle(q) {
     case 'transcribe': return transcribe(q);
     case 'tallyput': return tallyPut(q);
     case 'tallyget': if (role !== 'owner') fail('not_allowed'); return {tally: tallyRead()};
+    case 'convert': return convertFile(q);
   }
   fail('invalid_request');
 }
@@ -117,6 +118,40 @@ function askAI(q, maxImages) {
   if (why === 'content_filter') fail('refused');
   if (!text) fail('empty_completion');
   return {text: text, truncated: msg.status === 'incomplete'};
+}
+
+/* ---------- PDF tools: convert Word, Excel, PowerPoint <-> PDF through Google Drive ----------
+   The file is uploaded as a Google Doc, Sheet or Slides file, exported, and permanently deleted straight away.
+   Needs the Drive API turned on for this project (Services > Drive API). Counts toward DAILY_LIMIT. */
+var CONVERT_IN = {
+  docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document'], doc: ['application/msword', 'document'],
+  odt: ['application/vnd.oasis.opendocument.text', 'document'], rtf: ['application/rtf', 'document'], txt: ['text/plain', 'document'],
+  xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'spreadsheet'], xls: ['application/vnd.ms-excel', 'spreadsheet'],
+  csv: ['text/csv', 'spreadsheet'], ods: ['application/vnd.oasis.opendocument.spreadsheet', 'spreadsheet'],
+  pptx: ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'presentation'], ppt: ['application/vnd.ms-powerpoint', 'presentation'],
+  odp: ['application/vnd.oasis.opendocument.presentation', 'presentation'], pdf: ['application/pdf', 'document']
+};
+var CONVERT_OUT = {pdf: 'application/pdf', docx: CONVERT_IN.docx[0]};
+function convertFile(q) {
+  var ext = String(q.ext || '').toLowerCase(), to = String(q.to || ''), kind = CONVERT_IN[ext];
+  if (!kind || !CONVERT_OUT[to] || (to === 'docx') !== (ext === 'pdf')) fail('invalid_request');
+  var b64 = String(q.data || ''); if (!b64 || b64.length > 34000000) fail('too_large');
+  underDailyLimit();
+  var token = ScriptApp.getOAuthToken(), boundary = 'rff' + Date.now(), auth = {Authorization: 'Bearer ' + token};
+  var head = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({name: 'rff-convert-' + Date.now(), mimeType: 'application/vnd.google-apps.' + kind[1]}) +
+    '\r\n--' + boundary + '\r\nContent-Type: ' + kind[0] + '\r\n\r\n';
+  var payload = Utilities.newBlob(head).getBytes().concat(Utilities.base64Decode(b64)).concat(Utilities.newBlob('\r\n--' + boundary + '--').getBytes());
+  var up = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id' + (ext === 'pdf' ? '&ocrLanguage=en' : ''),
+    {method: 'post', contentType: 'multipart/related; boundary=' + boundary, payload: payload, headers: auth, muteHttpExceptions: true});
+  if (up.getResponseCode() !== 200) { console.error('convert upload ' + up.getResponseCode() + ' ' + up.getContentText().slice(0, 200)); fail(up.getResponseCode() === 403 ? 'convert_setup' : 'convert_failed'); }
+  var id = JSON.parse(up.getContentText()).id;
+  try {
+    var ex = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/export?mimeType=' + encodeURIComponent(CONVERT_OUT[to]), {headers: auth, muteHttpExceptions: true});
+    if (ex.getResponseCode() !== 200) { console.error('convert export ' + ex.getResponseCode()); fail(ex.getResponseCode() === 403 ? 'too_large' : 'convert_failed'); }
+    return {data: Utilities.base64Encode(ex.getContent()), mime: CONVERT_OUT[to]};
+  } finally {
+    UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id, {method: 'delete', headers: auth, muteHttpExceptions: true});
+  }
 }
 
 /* ---------- REDEFINE On Field: voice notes to text ----------
