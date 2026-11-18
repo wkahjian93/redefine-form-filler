@@ -152,7 +152,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const row = document.querySelector('#aSave'); if (!row) return;
     const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = 'Sign out'; b.style.marginRight = 'auto';
-    b.onclick = () => { store(null); location.reload(); };
+    b.onclick = () => { store(null); try { localStorage.removeItem('rff.draft'); } catch (e) {} location.reload(); };
     row.parentElement.prepend(b);
   });
 })();
@@ -324,7 +324,29 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
   .step{min-height:42px}
   .clist li{min-height:48px}
 }
-@media (max-width:1100px){ .cols{grid-template-columns:220px minmax(0,1fr)} .cols>.pvcol{grid-column:1/-1} }
+@media (max-width:1100px){ .cols{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr)} .cols>.card:first-child{grid-column:1/-1} .cols>.card:first-child .clist{max-height:150px} }
+/* fill on the form: tap a box on the preview to type into it */
+.pvscroll{position:relative}
+.ftgt{position:absolute;border-radius:2px;cursor:pointer;z-index:1}
+.ftgt::before{content:"";position:absolute;inset:-6px -3px}
+.ftgt.empty{background:rgba(247,208,0,.28);outline:1.5px solid rgba(214,160,0,.9)}
+.ftgt.filled{outline:1px dashed rgba(31,63,154,.35)}
+.ftgt.cur{outline:2.5px solid #c62f3b;background:rgba(198,47,59,.14);z-index:2}
+.fillpop{position:absolute;z-index:5;background:var(--sheet);border:1.5px solid var(--ink);border-radius:10px;box-shadow:0 10px 28px rgba(16,24,40,.25);padding:10px;display:flex;flex-direction:column;gap:8px}
+.fillpop label{font-weight:600;font-size:13px}
+.fillpop .lbl small{display:block;font-weight:400;color:var(--ink-2)}
+.fillpop input{border:1px solid var(--rule);border-radius:6px;padding:7px 8px;background:var(--paper);width:100%;font-size:16px}
+.fillpop .opts{display:flex;flex-wrap:wrap;gap:6px}
+.fillpop .opts .btn[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.fillpop img.sigshow{max-height:56px;max-width:100%;align-self:flex-start;background:#fff;border:1px solid var(--rule);border-radius:6px;padding:4px}
+.fillhint{font-size:12.5px;color:var(--ink-2);margin:6px 0 0}
+.viewseg{display:none;gap:4px;margin:0 0 10px;background:var(--rule-2);padding:4px;border-radius:9px}
+.viewseg button{flex:1;border:0;background:transparent;border-radius:7px;padding:8px;font-weight:600;font-size:13.5px;color:var(--ink);cursor:pointer}
+.viewseg button[aria-pressed="true"]{background:var(--sheet);box-shadow:0 1px 3px rgba(16,24,40,.15)}
+.sigfield{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sigfield img{max-height:40px;max-width:160px;background:#fff;border:1px solid var(--rule);border-radius:5px;padding:2px}
+#draftBar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:var(--sheet);border:1px solid var(--rule);border-left:4px solid #1f3f9a;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+@media (max-width:760px){ .viewseg{display:flex} #p3.v-form #cEdit{display:none} #p3.v-fields .pvcol{display:none} }
 @media (max-width:760px){ .clist{max-height:32vh} .teamband{height:auto;flex-direction:column;align-items:stretch;gap:0} .teamband .say{padding-block:16px 4px} .teamband img{height:auto;width:100%;max-width:100%} .grid2,.cols{grid-template-columns:minmax(0,1fr)} .steps{margin-left:0} .insp{position:static} .pv-wrap{max-height:none} }
 </style>
 
@@ -395,7 +417,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
       <div class="card">
         <h3>Read with AI</h3>
         <p class="note" style="margin:6px 0 12px">AI reads each file and fills the fields of the form you picked in step 1. Nothing is guessed: details that aren't in the files are left blank and listed for you to check. Client details go through the REDEFINE team server to OpenAI. REDEFINE does not save them. Remove details the form doesn't need, such as medical records, before uploading.</p>
-        <div class="row"><button class="btn primary" id="btnExtract">Read files &amp; fill</button><button class="btn" id="btnStop" hidden>Stop</button><button class="btn ghost" id="btnClearSrc">Clear files</button></div>
+        <div class="row"><button class="btn primary" id="btnExtract">Read files &amp; fill</button><button class="btn" id="btnByHand">Type on the form instead</button><button class="btn" id="btnStop" hidden>Stop</button><button class="btn ghost" id="btnClearSrc">Clear files</button></div>
         <div class="status" id="exStatus" style="margin-top:10px"></div>
         <div style="margin-top:14px;border-top:1px solid var(--rule-2);padding-top:12px">
           <div class="row" style="justify-content:space-between"><b>No AI? Use the Excel template</b><button class="btn sm" id="btnTpl">Download template</button></div>
@@ -417,6 +439,7 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
         <button class="btn primary" id="btnPdf">Download this PDF</button>
       </div>
     </div>
+    <div class="viewseg" id="p3Seg" role="group" aria-label="View"><button data-v="form" aria-pressed="true">See the form</button><button data-v="fields" aria-pressed="false">Type the details</button></div>
     <div class="cols">
       <div class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:8px"><b class="num" id="cCount">0 customers</b><button class="btn sm" id="btnNewC">＋ New</button></div>
@@ -427,7 +450,8 @@ textarea#paste{min-height:130px;font-family:var(--f-data);font-size:13px;resize:
       <div class="card pvcol">
         <div class="row" style="justify-content:space-between"><b>Filled form</b><span class="status" id="pvStatus"></span></div>
         <div id="issues"></div>
-        <div class="pages pv-wrap" id="pvPages" style="margin-top:8px"></div>
+        <p class="fillhint" id="fillHint" hidden>Tap a yellow box on the form to fill it in.</p>
+        <div class="pv-wrap pvscroll" id="pvScroll" style="margin-top:8px"><div class="pages" id="pvPages"></div><div class="fillpop" id="fillPop" hidden></div></div>
       </div>
     </div>
   </section>
@@ -1159,7 +1183,9 @@ function slotValue(s, values){
   return v;
 }
 const optMatch = (v, opt) => { const a = S(v).toUpperCase(), b = S(opt).toUpperCase(); if (!a || !b) return false; if (a === b) return true; if (/^(Y|YES|YA|TRUE)$/.test(a) && /^(Y|YES|YA|TRUE)$/.test(b)) return true; if (/^(N|NO|TIDAK|FALSE)$/.test(a) && /^(N|NO|TIDAK|FALSE)$/.test(b)) return true; return a.length > 1 && b.startsWith(a) || b.length > 2 && a.startsWith(b); };
-async function fillCustom(bytes, f, values){
+const isSigField = f => !!f && /sign|tandatangan|签/i.test(f.key + ' ' + f.label) && !/date|tarikh|日期|name|nama|姓名|place|tempat/i.test(f.key + ' ' + f.label);
+const isSigKey = key => isSigField(form.fields.find(x => x.key === key));
+async function fillCustom(bytes, f, values, sigs){
   const doc = await PDFLib.PDFDocument.load(bytes); const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
   const ink = PDFLib.rgb(0.02, 0.06, 0.3); const pages = doc.getPages(); const issues = [];
   const T = v => S(v).replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\x20-\x7E -ÿ]/g,'').replace(/\s+/g,' ').trim().toUpperCase();
@@ -1178,8 +1204,18 @@ async function fillCustom(bytes, f, values){
       }
     }
     let size = Math.min(10, h*.7); while (size > 5 && font.widthOfTextAtSize(s, size) > w-3) size -= .25; let t = s; let over = false; while (t && font.widthOfTextAtSize(t, size) > w-3){ t = t.slice(0, -1); over = true; } p.drawText(t, {x:x+1.5, y: y + Math.max(1.5, (h - size*.72)/2), size, font, color:ink}); return over; };
+  const sigImg = {};
   for (const s of f.slots){
     if (!s.key) continue; const p = pages[s.page-1]; if (!p) continue;
+    if (sigs && sigs[s.key]){
+      try {
+        const im = sigImg[s.key] || (sigImg[s.key] = await doc.embedPng(sigs[s.key]));
+        const ys = s.rows || [s.y], bot = Math.min(...ys), boxH = Math.max(...ys) + s.h - bot;
+        const maxH = Math.max(boxH, 30), k = Math.min(s.w / im.width, maxH / im.height), w = im.width * k, hh = im.height * k;
+        p.drawImage(im, {x: s.x + (s.w - w) / 2, y: bot + (boxH >= 30 ? (boxH - hh) / 2 : 1), width: w, height: hh});
+      } catch(e){ console.error(e); issues.push({level:'warn', msg:`${labelOf(f, s.key)}: the signature picture could not be added.`}); }
+      continue;
+    }
     if (s.kind === 'check'){ if (optMatch(values[s.key], s.option ?? 'Yes')) tickAt(p, s.x, s.y, s.w, s.h); continue; }
     let v = T(slotValue(s, values)); if (!v) continue;
     if (s.kind === 'comb'){
@@ -1199,9 +1235,9 @@ async function fillFor(c){
     const {bytes, issues} = await buildPdf(PDFLib, PRESET_BYTES, c.values, {agentName:agent.name, agentIac:agent.iac, today:agent.today, caps:true, derive:true, split:true});
     return {bytes, issues};
   }
-  const r = await fillCustom(formBytes, form, c.values);
+  const r = await fillCustom(formBytes, form, c.values, c.sigs);
   const keys = new Set(form.slots.filter(s => s.key).map(s => s.key));
-  const empty = [...keys].filter(k => !S(c.values[k]));
+  const empty = [...keys].filter(k => !S(c.values[k]) && !(c.sigs && c.sigs[k]));
   if (empty.length && empty.length < keys.size) r.issues.unshift({level:'info', msg:`${empty.length} field(s) on the form are blank.`});
   return r;
 }
@@ -1406,7 +1442,7 @@ async function selectForm(id){
     try { f.bytes = await FormStore.bytes(f); } catch(e){ toast('Could not open this form. Check your connection and try again.'); return; }
   }
   if (customers.length && f.id !== form.id && (f.kind === 'custom' || form.kind === 'custom')) toast('Customers keep their details, but fields only match if both forms use the same names. Re-read files if needed.');
-  form = f; formBytes = f.kind === 'preset' ? PRESET_BYTES : new Uint8Array(f.bytes); selSlot = null; addMode = false;
+  form = f; formBytes = f.kind === 'preset' ? PRESET_BYTES : new Uint8Array(f.bytes); selSlot = null; addMode = false; closeFillPop(); setP3View(f.kind === 'custom' ? 'form' : 'fields');
   renderFormList(); await renderFormLayout(); renderCustomers();
   if (f.kind === 'custom' && f.savedAt && (f.dv || 0) < DETECT_V && !remapping && await ai()) remap();
 }
@@ -1528,32 +1564,168 @@ function displaySub(c){ const v = c.values; const ref = S(v.policy_no) || S(v.pr
 function renderCustomers(){
   $('#cCount').textContent = `${customers.length} customer${customers.length === 1 ? '' : 's'}`;
   $('#cList').innerHTML = customers.map(c => `<li data-c="${c.id}" class="${c.id === selId ? 'sel' : ''}"><span class="dot ${levelOf(c)}"></span><span class="nm"><b>${esc(displayName(c))}</b><span>${esc(displaySub(c))}</span></span></li>`).join('') || '<li class="empty" style="cursor:default">None yet</li>';
-  $('#cList').querySelectorAll('[data-c]').forEach(li => li.onclick = () => { selId = li.dataset.c; renderCustomers(); });
+  $('#cList').querySelectorAll('[data-c]').forEach(li => li.onclick = () => { selId = li.dataset.c; closeFillPop(); renderCustomers(); });
   renderEditor(); schedulePreview(0);
 }
 function renderEditor(){
   const c = cur(), box = $('#cEdit');
-  if (!c){ box.innerHTML = '<div class="empty">No customers yet. Add files in step 2.</div>'; $('#issues').innerHTML = ''; $('#pvPages').replaceChildren(); return; }
+  if (!c){ box.innerHTML = '<div class="empty">No customers yet. Add files in step 2, or <button class="btn sm" id="btnHandE">type on the form</button></div>'; $('#btnHandE').onclick = startByHand; $('#issues').innerHTML = ''; $('#pvPages').replaceChildren(); closeFillPop(); $('#fillHint').hidden = true; return; }
   const groups = []; form.fields.forEach(f => { let g = groups.find(x => x.name === f.group); if (!g) groups.push(g = {name:f.group, fields:[]}); g.fields.push(f); });
   const auto = form.kind === 'preset' ? resolveRecord(c.values, {agentName:agent.name, agentIac:agent.iac, today:agent.today, derive:true, split:true}).auto : {};
   box.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>${esc(displayName(c))}</b><span class="note">${c.source ? 'From: ' + esc(c.source) : ''}</span></div>
     <p class="note" style="margin:0 0 6px">Blue fields were filled by AI. Grey italic text is worked out automatically. Edit anything; the preview updates.</p>` +
     groups.map(g => { const n = g.fields.filter(f => S(c.values[f.key])).length; if (!n && /^(Nominee [234]|Trustee 2|Part 3)/.test(g.name) && form.kind === 'preset') return `<details class="grp"><summary>${esc(g.name)}<span class="ct">empty</span></summary><div class="fg">${g.fields.map(fieldHtml).join('')}</div></details>`;
       return `<details class="grp" ${n || g === groups[0] ? 'open' : ''}><summary>${esc(g.name)}<span class="ct">${n}/${g.fields.length}</span></summary><div class="fg">${g.fields.map(fieldHtml).join('')}</div></details>`; }).join('');
-  function fieldHtml(f){ const v = S(c.values[f.key]); const id = 'fv_' + f.key; const wide = /name|address/.test(f.key) && f.type === 'text';
+  function fieldHtml(f){ if (isSigField(f)){ const sg = c.sigs && c.sigs[f.key];
+      return `<div class="f wide"><label>${esc(f.label)}</label><div class="sigfield">${sg ? `<img src="${sg}" alt="Signature">` : ''}<button class="btn sm" data-sigk="${esc(f.key)}">${sg ? 'Change signature' : 'Add signature'}</button>${sg ? `<button class="btn ghost sm" data-sigx="${esc(f.key)}">Remove</button>` : ''}</div></div>`; }
+    const v = S(c.values[f.key]); const id = 'fv_' + f.key; const wide = /name|address/.test(f.key) && f.type === 'text';
     return `<div class="f ${wide ? 'wide' : ''}"><label for="${id}">${esc(f.label)}</label><input id="${id}" data-k="${esc(f.key)}" value="${esc(v)}" class="${(c.ai || []).includes(f.key) ? 'ai' : ''} ${/_id$|_no$|tel$|postcode/.test(f.key) ? 'mono' : ''}" placeholder="${esc(auto[f.key] ? 'auto: ' + auto[f.key] : f.type === 'date' ? 'DD/MM/YYYY' : '')}" ${f.options ? `list="dl_${esc(f.key)}"` : ''}>${f.options ? `<datalist id="dl_${esc(f.key)}">${f.options.map(o => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}</div>`; }
-  box.querySelectorAll('[data-k]').forEach(el => el.addEventListener('input', () => { if (el.value.trim()) c.values[el.dataset.k] = el.value; else delete c.values[el.dataset.k]; el.classList.remove('ai'); c.ai = (c.ai || []).filter(k => k !== el.dataset.k); schedulePreview(); clearTimeout(renderEditor.lt); renderEditor.lt = setTimeout(() => { const li = $(`#cList [data-c="${c.id}"]`); if (li){ li.querySelector('.dot').className = 'dot ' + levelOf(c); li.querySelector('b').textContent = displayName(c); } }, 400); }));
+  box.querySelectorAll('[data-sigk]').forEach(b => b.onclick = () => pickSignature(c, b.dataset.sigk));
+  box.querySelectorAll('[data-sigx]').forEach(b => b.onclick = () => { delete c.sigs[b.dataset.sigx]; renderEditor(); schedulePreview(0); });
+  box.querySelectorAll('[data-k]').forEach(el => el.addEventListener('input', () => { if (el.value.trim()) c.values[el.dataset.k] = el.value; else delete c.values[el.dataset.k]; el.classList.remove('ai'); c.ai = (c.ai || []).filter(k => k !== el.dataset.k); afterEdit(c); if (fillKey === el.dataset.k){ const pi = $('#fillPop input'); if (pi) pi.value = el.value; } }));
 }
 function showIssues(list){ const o = {error:0, warn:1, info:2}; $('#issues').innerHTML = [...list].sort((a,b) => o[a.level] - o[b.level]).map(i => `<div class="iss ${i.level}">${i.level === 'error' ? '✖' : i.level === 'warn' ? '⚠' : 'ℹ'} ${esc(i.msg)}</div>`).join(''); }
 let pvT, pvN = 0;
-function schedulePreview(d){ clearTimeout(pvT); pvT = setTimeout(preview, d === undefined ? 800 : d); }
+function schedulePreview(d){ clearTimeout(pvT); pvT = setTimeout(preview, d === undefined ? 800 : d); saveDraftSoon(); }
 async function preview(){
   const c = cur(); if (!c || !$('#p3').classList.contains('on')) return;
   const n = ++pvN; $('#pvStatus').className = 'status busy'; $('#pvStatus').textContent = 'Filling…';
   try { const {bytes, issues} = await fillFor(c); if (n !== pvN) return; const extra = issuesFor(c).filter(i => form.kind !== 'preset' || !/^(Not found|AI)/.test(i.msg) ? true : true);
     const seen = new Set(); showIssues([...(form.kind === 'preset' ? issues : issues), ...extra].filter(i => !seen.has(i.msg) && seen.add(i.msg)));
-    await renderPages(bytes, $('#pvPages'), {maxPages: 8}); if (n === pvN){ $('#pvStatus').className = 'status'; $('#pvStatus').textContent = ''; } }
+    const pages = await renderPages(bytes, $('#pvPages'), {maxPages: 8}); if (n === pvN) drawFillTargets(pages, c); if (n === pvN){ $('#pvStatus').className = 'status'; $('#pvStatus').textContent = ''; } }
   catch(e){ console.error(e); $('#pvStatus').className = 'status'; $('#pvStatus').textContent = 'Could not fill: ' + e.message; }
+}
+
+/* ======================= fill on the form: tap a box on the preview to type into it ======================= */
+let fillKey = null, fillSlot = null, fillPages = [];
+const isFilled = (c, key) => !!(S(c.values[key]) || (c.sigs && c.sigs[key]));
+const slotTop = s => Math.max(...(s.rows || [s.y])) + s.h, slotBot = s => Math.min(...(s.rows || [s.y]));
+function fillOrder(){
+  const seen = new Set(), out = [];
+  form.slots.filter(s => s.key && s.page <= 8).sort((a, b) => a.page - b.page || Math.round(slotTop(b) / 8) - Math.round(slotTop(a) / 8) || a.x - b.x)
+    .forEach(s => { if (!seen.has(s.key)){ seen.add(s.key); out.push(s.key); } });
+  return out;
+}
+function drawFillTargets(pages, c){
+  fillPages = pages;
+  const on = form.kind === 'custom' && form.slots.some(s => s.key);
+  if (!on){ $('#fillHint').hidden = true; closeFillPop(); return; }
+  const left = fillOrder().filter(k => !isFilled(c, k)).length;
+  $('#fillHint').hidden = false;
+  $('#fillHint').textContent = left ? `Tap a yellow box on the form to fill it in. ${left} still empty.` : 'Every box has something in it. Tap any box to change it.';
+  pages.forEach((pg, i) => form.slots.filter(s => s.key && s.page === i + 1).forEach(s => {
+    const d = document.createElement('div'), top = slotTop(s), bot = slotBot(s);
+    d.className = 'ftgt ' + (isFilled(c, s.key) ? 'filled' : 'empty') + (s.key === fillKey ? ' cur' : '');
+    d.dataset.fk = s.key; d.title = labelOf(form, s.key);
+    Object.assign(d.style, {left: s.x / pg.w * 100 + '%', top: (pg.h - top) / pg.h * 100 + '%', width: s.w / pg.w * 100 + '%', height: (top - bot) / pg.h * 100 + '%'});
+    d.onclick = e => { e.stopPropagation(); openFillPop(s.key, s); };
+    pg.div.appendChild(d);
+  }));
+  if (fillKey){ if (form.slots.some(s => s.key === fillKey)) placeFillPop(); else closeFillPop(); }
+}
+function markCur(){ document.querySelectorAll('#pvPages .ftgt').forEach(d => d.classList.toggle('cur', d.dataset.fk === fillKey)); }
+function openFillPop(key, slot){
+  if (!cur()) return;
+  fillKey = key; fillSlot = slot || form.slots.find(s => s.key === key);
+  renderFillPop(); markCur(); placeFillPop();
+  const pop = $('#fillPop'); pop.scrollIntoView({block:'nearest', behavior:'smooth'});
+  const inp = pop.querySelector('input'); if (inp) inp.focus({preventScroll:true});
+}
+function closeFillPop(){ fillKey = null; fillSlot = null; const p = $('#fillPop'); if (p) p.hidden = true; markCur(); }
+function renderFillPop(){
+  const c = cur(), key = fillKey, pop = $('#fillPop'); if (!c || !key) return;
+  const f = form.fields.find(x => x.key === key) || {key, label:key.replace(/_/g, ' ')};
+  const checks = form.slots.filter(s => s.key === key && s.kind === 'check');
+  const opts = f.options && f.options.length ? f.options : [...new Set(checks.map(s => S(s.option ?? 'Yes')))];
+  const order = fillOrder(), i = order.indexOf(key), v = S(c.values[key]);
+  let body;
+  if (isSigField(f)){
+    const sg = c.sigs && c.sigs[key];
+    body = `${sg ? `<img class="sigshow" src="${sg}" alt="Signature">` : ''}<div class="opts"><button class="btn sm primary" data-act="sig">${sg ? 'Change signature' : 'Add signature'}</button>${sg ? '<button class="btn sm ghost" data-act="unsig">Remove</button>' : ''}</div>`;
+  } else if (checks.length){
+    body = `<div class="opts">${opts.map((o, j) => `<button class="btn sm" data-opt="${j}" aria-pressed="${optMatch(v, o)}">${esc(o)}</button>`).join('')}${v ? '<button class="btn sm ghost" data-act="clear">Clear</button>' : ''}</div>`;
+  } else {
+    body = `<input data-k="${esc(key)}" value="${esc(v)}" autocomplete="off" enterkeyhint="next" placeholder="${f.type === 'date' ? 'DD/MM/YYYY' : 'Type here'}" ${opts.length ? 'list="fpOpts"' : ''}>${opts.length ? `<datalist id="fpOpts">${opts.map(o => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}`;
+  }
+  pop.innerHTML = `<div class="lbl"><label>${esc(f.label)}${f.group && f.group !== 'Other' ? `<small>${esc(f.group)}</small>` : ''}</label></div>${body}
+    <div class="row" style="justify-content:space-between"><span class="note" style="margin:0">${i + 1} of ${order.length}</span><span class="row" style="gap:6px"><button class="btn sm" data-act="prev" aria-label="Previous box">‹</button><button class="btn sm" data-act="next">Next ›</button><button class="btn sm ink" data-act="done">Done</button></span></div>`;
+  const set = val => { if (S(val)) c.values[key] = val; else delete c.values[key]; c.ai = (c.ai || []).filter(k => k !== key);
+    const ed = document.querySelector(`#cEdit input[data-k="${CSS.escape(key)}"]`); if (ed && ed !== document.activeElement){ ed.value = val; ed.classList.remove('ai'); }
+    afterEdit(c); };
+  const move = d => openFillPop(order[(i + d + order.length) % order.length]);
+  const inp = pop.querySelector('input'); if (inp){ inp.oninput = () => set(inp.value); inp.onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); move(1); } }; }
+  pop.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => { const o = opts[+b.dataset.opt]; set(optMatch(v, o) ? '' : o); renderFillPop(); });
+  pop.querySelectorAll('[data-act]').forEach(b => b.onclick = () => ({
+    prev: () => move(-1), next: () => move(1), done: closeFillPop,
+    clear: () => { set(''); renderFillPop(); },
+    sig: () => pickSignature(c, key),
+    unsig: () => { delete c.sigs[key]; renderEditor(); schedulePreview(0); renderFillPop(); }
+  })[b.dataset.act]());
+}
+function placeFillPop(){
+  const pop = $('#fillPop'), wrap = $('#pvScroll'), s = fillSlot, pg = s && fillPages[s.page - 1];
+  if (!pg){ pop.hidden = true; return; }
+  const H = pg.div.offsetHeight, W = pg.div.offsetWidth, width = Math.min(340, wrap.clientWidth - 8);
+  const x = Math.max(4, Math.min(pg.div.offsetLeft + s.x / pg.w * W, wrap.clientWidth - width - 4));
+  pop.style.left = x + 'px'; pop.style.top = (pg.div.offsetTop + (pg.h - slotBot(s)) / pg.h * H + 8) + 'px'; pop.style.width = width + 'px';
+  pop.hidden = false;
+}
+function afterEdit(c){
+  schedulePreview();
+  clearTimeout(afterEdit.t); afterEdit.t = setTimeout(() => { const li = $(`#cList [data-c="${c.id}"]`); if (li){ li.querySelector('.dot').className = 'dot ' + levelOf(c); li.querySelector('b').textContent = displayName(c); } }, 400);
+}
+async function pickSignature(c, key){
+  const get = window.__rff && window.__rff.getSignature; if (!get) return toast('Signatures are not available here.');
+  const f = form.fields.find(x => x.key === key);
+  const d = await get({title: f ? f.label : 'Signature', mine: true}); if (!d) return;
+  c.sigs = Object.assign({}, c.sigs, {[key]: d}); renderEditor(); schedulePreview(0); if (fillKey === key) renderFillPop();
+}
+function startByHand(){
+  customers = customers.filter(c => c.source !== 'example');
+  const c = {id:uid(), values:{}, source:'typed in'}; customers.push(c); selId = c.id;
+  setP3View('form'); renderCustomers(); go(3);
+}
+function setP3View(v){
+  $('#p3').classList.toggle('v-form', v === 'form'); $('#p3').classList.toggle('v-fields', v !== 'form');
+  $('#p3Seg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+  if (v !== 'form') closeFillPop();
+}
+
+/* ======================= drafts: keep the work if the app is closed or the phone switches apps ======================= */
+/* Kept on this device only (localStorage), never sent anywhere. Cleared by "Start fresh", by signing out, or after 7 days. */
+const DRAFT_KEY = 'rff.draft', DRAFT_DAYS = 7;
+let draftReady = false, draftT = null, lastStep = 1;
+function saveDraftNow(){
+  if (!draftReady) return; clearTimeout(draftT); draftT = null;
+  const list = customers.filter(c => c.source !== 'example'), paste = $('#paste').value;
+  try {
+    if (!list.length && !paste.trim()){ localStorage.removeItem(DRAFT_KEY); return; }
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({v:1, at:Date.now(), formId:form.id, formName:form.name, step:lastStep, selId, paste, oneCust:$('#oneCust').checked, customers:list}));
+  } catch(e){ if (!saveDraftNow.warned){ saveDraftNow.warned = true; toast('This device is out of space, so your work can’t be kept as a draft.'); } }
+}
+function saveDraftSoon(){ if (!draftReady) return; clearTimeout(draftT); draftT = setTimeout(saveDraftNow, 600); }
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveDraftNow(); });
+window.addEventListener('pagehide', saveDraftNow);
+function showDraftBar(d){
+  let bar = $('#draftBar'); if (!bar){ bar = document.createElement('div'); bar.id = 'draftBar'; $('#p1').before(bar); }
+  const n = d.customers.length;
+  bar.innerHTML = `<span>Picked up where you left off: ${n} customer${n === 1 ? '' : 's'}, saved ${esc(fmtSavedTime(d.at))}. Kept on this device only.</span><button class="btn sm" id="draftClear">Start fresh</button>`;
+  $('#draftClear').onclick = e => { const b = e.currentTarget; if (!b.dataset.armed){ b.dataset.armed = 1; b.textContent = 'Tap again to clear'; return; }
+    customers = []; selId = null; $('#paste').value = ''; sources = []; renderSources(); try { localStorage.removeItem(DRAFT_KEY); } catch(err){} bar.remove(); closeFillPop(); renderCustomers(); go(1); toast('Draft cleared.'); };
+}
+async function restoreDraft(){
+  let d = null; try { d = JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch(e){}
+  if (!d || !Array.isArray(d.customers) || Date.now() - d.at > DRAFT_DAYS * 864e5){ try { localStorage.removeItem(DRAFT_KEY); } catch(e){} draftReady = true; return; }
+  if (d.formId && d.formId !== form.id){
+    let f; for (let i = 0; i < 40 && !(f = forms.find(x => x.id === d.formId)); i++) await sleep(500);
+    if (f){ const keep = customers; customers = []; await selectForm(f.id); customers = keep; }
+    else toast(`The form “${d.formName}” used in your draft isn’t in the list. Pick or upload it again in step 1.`);
+  }
+  customers = d.customers; selId = customers.some(c => c.id === d.selId) ? d.selId : (customers[0] || {}).id || null;
+  $('#paste').value = d.paste || ''; $('#oneCust').checked = !!d.oneCust;
+  draftReady = true; renderCustomers(); showDraftBar(d);
+  if (form.kind === 'custom') setP3View('form');
+  if (d.step > 1 && customers.length) go(d.step);
 }
 
 /* ======================= export ======================= */
@@ -1597,6 +1769,7 @@ function exportTemplate(){
 /* ======================= wiring ======================= */
 { const sp = $('#splash'); sp.onclick = () => sp.remove(); sp.addEventListener('animationend', e => { if (e.animationName === 'splashOut') sp.remove(); }); }
 function go(n){
+  lastStep = n; saveDraftSoon();
   [1,2,3].forEach(i => { $('#p' + i).classList.toggle('on', i === n); const b = $('#st' + i); if (i === n) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); b.classList.toggle('done', i < n); });
   if (n === 3) schedulePreview(0);
   if (n === 1 && !layoutPages.length) renderFormLayout();
@@ -1619,6 +1792,10 @@ $('#btnExtract').onclick = runExtraction;
 $('#btnStop').onclick = () => stopCtl && stopCtl.abort();
 $('#btnClearSrc').onclick = () => { sources = []; $('#paste').value = ''; renderSources(); $('#exStatus').textContent = ''; };
 $('#btnTpl').onclick = exportTemplate;
+$('#btnByHand').onclick = startByHand;
+$('#paste').addEventListener('input', saveDraftSoon);
+$('#p3Seg').onclick = e => { const b = e.target.closest('button[data-v]'); if (b) setP3View(b.dataset.v); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && fillKey) closeFillPop(); });
 $('#btnAddSlot').onclick = () => { addMode = true; layoutPages.forEach(p => p.div.classList.add('adding')); toast('Click on the form where the new text box should go.'); };
 $('#btnRemap').onclick = remap;
 $('#btnNewC').onclick = () => { const c = {id:uid(), values:{}, source:'typed in'}; customers.push(c); selId = c.id; renderCustomers(); };
@@ -1635,7 +1812,8 @@ let rT; window.addEventListener('resize', () => { clearTimeout(rT); rT = setTime
 /* example so the review screen shows what the tool does before any upload */
 customers.push({id:uid(), values:{policy_no:'1022033998', po_name:'TAN WEI MING', po_id:'900312075123', po_muslim:'No', po_status:'Married', po_children:'1', n1_name:'LIM MEI LING', n1_id:'920521075234', n1_relationship:'Wife', n1_share:'100', n1_address:'12 JALAN MAHSURI, TAMAN BAYAN BARU', n1_postcode:'11950', n1_town:'BAYAN LEPAS, PENANG', n1_country:'Malaysia'}, missing:[], notes:['Example customer. Delete it once you add your own.'], source:'example'});
 selId = customers[0].id;
-renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
+setP3View('fields');
+renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai(); restoreDraft();
 </script>
 
 <script>/* Scan & sign, and My profile. Everything here runs on the device: scans, mark-ups and the agent's
@@ -1796,10 +1974,51 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
   }
   async function inkFromPhoto(file) {
     const bmp = await createImageBitmap(file), k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = bmp.width * k; c.height = bmp.height * k; const g = c.getContext('2d'); g.drawImage(bmp, 0, 0, c.width, c.height);
+    const c = document.createElement('canvas'); c.width = bmp.width * k; c.height = bmp.height * k; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
     const im = g.getImageData(0, 0, c.width, c.height), d = im.data;
     for (let i = 0; i < d.length; i += 4) { const l = .3 * d[i] + .59 * d[i + 1] + .11 * d[i + 2], a = Math.max(0, Math.min(255, (175 - l) * 3)); d[i] = 10; d[i + 1] = 26; d[i + 2] = 74; d[i + 3] = a; }
     g.putImageData(im, 0, 0); const t = trimmed(c); if (!t) throw new Error('blank'); return t;
+  }
+
+  function getSignature(opt) {
+    opt = opt || {};
+    return new Promise(done => {
+      const m = h(`<div class="modal open sigsheet"><div>
+        <h3>${escH(opt.title || 'Signature')}</h3>
+        <p class="note" style="margin:4px 0 8px">Hand the phone to the client to sign with a finger, or add a photo or picture of their signature.</p>
+        <canvas class="sigpad" style="height:min(42vh,240px)"></canvas>
+        <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" data-a="clear">Clear</button>
+          <label class="btn sm">Photo of signature<input type="file" accept="image/*" hidden></label>
+          <button class="btn sm" data-a="paste">Paste picture</button>
+          ${opt.mine && profile.signature ? '<button class="btn sm" data-a="mine">Use my saved signature</button>' : ''}
+        </div>
+        <div class="sigpaste" contenteditable="true" aria-label="Paste a signature picture here" style="margin-top:8px;border:1px dashed var(--rule);border-radius:8px;padding:8px;font-size:13px;color:var(--ink-2);min-height:20px">Or long-press here and choose Paste</div>
+        <p class="note sigmsg" role="alert" style="margin:6px 0 0"></p>
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-a="cancel">Cancel</button><button class="btn primary" data-a="use">Use this signature</button></div>
+      </div></div>`);
+      document.body.appendChild(m);
+      const pad = sigPad(m.querySelector('canvas')), msg = m.querySelector('.sigmsg');
+      let picked = null;
+      const showPicked = d => { picked = d; pad.clear(); const g = m.querySelector('canvas'); const im = new Image(); im.onload = () => { const r = g.getBoundingClientRect(), ctx = g.getContext('2d'), k = Math.min((r.width - 20) / im.width, (r.height - 20) / im.height, 1); ctx.drawImage(im, (r.width - im.width * k) / 2, (r.height - im.height * k) / 2, im.width * k, im.height * k); }; im.src = d; msg.textContent = 'Picture added. Tap Use this signature, or Clear to sign instead.'; };
+      const fromBlob = async b => { try { showPicked(await inkFromPhoto(b)); } catch (e) { msg.textContent = 'No signature found in that picture. Use a clear photo on white paper.'; } };
+      const close = v => { document.removeEventListener('paste', onPaste, true); m.remove(); done(v); };
+      const onPaste = e => { const f = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => /^image\//.test(i.type)); if (!f) { if (e.target.closest && e.target.closest('.sigpaste')) { e.preventDefault(); msg.textContent = 'There is no picture to paste. Copy the signature picture first.'; } return; } e.preventDefault(); fromBlob(f.getAsFile()); };
+      document.addEventListener('paste', onPaste, true);
+      m.querySelector('canvas').addEventListener('pointerdown', () => { picked = null; msg.textContent = ''; });
+      m.querySelector('input[type=file]').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) fromBlob(f); };
+      m.addEventListener('click', async e => {
+        const a = e.target.closest('[data-a]'); if (!a) return;
+        if (a.dataset.a === 'clear') { pad.clear(); picked = null; msg.textContent = ''; }
+        if (a.dataset.a === 'cancel') close(null);
+        if (a.dataset.a === 'mine') close(profile.signature);
+        if (a.dataset.a === 'use') { const d = picked || pad.dataURL(); if (!d) { msg.textContent = 'Sign in the box first.'; return; } close(d); }
+        if (a.dataset.a === 'paste') {
+          try { const items = await navigator.clipboard.read(); for (const it of items) { const t = it.types.find(x => /^image\//.test(x)); if (t) { fromBlob(await it.getType(t)); return; } } msg.textContent = 'There is no picture to paste. Copy the signature picture first.'; }
+          catch (err) { msg.textContent = 'This browser blocked pasting. Long-press the dotted box below and choose Paste.'; }
+        }
+      });
+    });
   }
 
   /* ---------------- files ---------------- */
@@ -2180,7 +2399,12 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     q('#mkField').onclick = e => popMenu(e.currentTarget, [['text', 'Text box'], ['check', 'Tick box'], ['choice', 'Drop-down choice'], ['sign', 'Signature box (for the client)'], ['date', 'Date box']].map(([k, l]) => ({label: l, run: () => { fieldN++; addObj({type: 'field', ft: k, name: {text: 'Text', check: 'Tick', choice: 'Choice', sign: 'Signature', date: 'Date'}[k] + ' ' + fieldN, options: k === 'choice' ? 'Yes, No' : '', w: k === 'check' ? .03 : k === 'sign' ? .3 : .26, h: k === 'check' ? .021 : k === 'sign' ? .06 : .028, x: .3, y: .45}); }})));
     q('#mkText').onclick = () => addObj({type: 'text', text: 'Type here', size: .028, color: '#0a1a4a'});
     q('#mkDate').onclick = () => addObj({type: 'text', text: today(), size: .024, color: '#0a1a4a'});
-    q('#mkSig').onclick = () => { if (!profile.signature) { say('Save your signature in My profile first.'); return setMode('profile'); } const im = new Image(); im.onload = () => addObj({type: 'img', src: profile.signature, w: .26, ar: im.height / im.width}); im.src = profile.signature; };
+    const addSig = src => { const im = new Image(); im.onload = () => addObj({type: 'img', src, w: .26, ar: im.height / im.width}); im.src = src; };
+    q('#mkSig').onclick = e => popMenu(e.currentTarget, [
+      {label: 'My signature', sub: profile.signature ? 'Saved in My profile' : 'Not saved yet', run: () => { if (!profile.signature) { say('Save your signature in My profile first.'); return setMode('profile'); } addSig(profile.signature); }},
+      {label: 'Client signs now', sub: 'Hand over the phone or iPad', run: async () => { const d = await getSignature({title: 'Client signature'}); if (d) addSig(d); }},
+      {label: 'Client signature from a picture', sub: 'Photo, or paste a picture', run: async () => { const d = await getSignature({title: 'Client signature'}); if (d) addSig(d); }}
+    ]);
     q('#mkMe').onclick = e => popMenu(e.currentTarget, myItems().map(it => ({label: it.label, sub: it.text, run: () => addObj({type: 'text', text: it.text, size: .024, color: '#0a1a4a'})})), 'Nothing saved yet. Add your details in My profile.');
     q('#mkWm').onclick = () => { watermark.on = !watermark.on; q('#mkWm').setAttribute('aria-pressed', String(watermark.on)); selId = watermark.on ? 'wm' : null; drawWatermarks(); panel(); };
     q('#mkDone').onclick = finish;
@@ -2366,16 +2590,16 @@ renderFormList(); renderFormLayout(); renderCustomers(); loadSavedForms(); ai();
     b.onclick = async () => { const c = cur(); if (!c) return say('Select a customer first.'); b.disabled = true; try { const {bytes} = await fillFor(c); await openMarkup({pdf: bytes, name: fileName(c), back: 'fill'}); } finally { b.disabled = false; } };
   }
   let lastField = null;
-  q('#cEdit').addEventListener('focusin', e => { if (e.target.matches('input[data-k]')) lastField = e.target; });
+  q('#p3').addEventListener('focusin', e => { if (e.target.matches('input[data-k]')) lastField = e.target; });
   const meBar = h(`<div class="mebar" id="meBar"></div>`); q('#p3 .cols').before(meBar);
   function renderMeBar() {
     const items = myItems().filter(i => i.label !== "Today's date" || true);
     meBar.innerHTML = `<span class="note">Insert my details:</span>${items.map((it, i) => `<button class="chip" data-i="${i}" title="${escH(it.text)}">${escH(it.label)}</button>`).join('')}${FIELDS.some(([k]) => profile[k]) ? '' : '<button class="chip" data-go>Set up My profile</button>'}`;
-    meBar.querySelectorAll('[data-i]').forEach(b => { b.onpointerdown = e => e.preventDefault(); b.onclick = () => { const a = document.activeElement; if (a && a.matches && a.matches('#cEdit input[data-k]')) lastField = a; if (!lastField || !document.body.contains(lastField)) return say('Tap a field first, then tap your detail.'); lastField.value = items[+b.dataset.i].text; lastField.dispatchEvent(new Event('input', {bubbles: true})); lastField.focus(); }; });
+    meBar.querySelectorAll('[data-i]').forEach(b => { b.onpointerdown = e => e.preventDefault(); b.onclick = () => { const a = document.activeElement; if (a && a.matches && a.matches('#p3 input[data-k]')) lastField = a; if (!lastField || !document.body.contains(lastField)) return say('Tap a field first, then tap your detail.'); lastField.value = items[+b.dataset.i].text; lastField.dispatchEvent(new Event('input', {bubbles: true})); lastField.focus(); }; });
     const g = meBar.querySelector('[data-go]'); if (g) g.onclick = () => setMode('profile');
   }
   renderMeBar();
-  window.__rff = {openMarkup, showResult, downloadFile, canShareFile, say, h, escH, today, uidT, cap, setMode, profile: () => profile, mode: () => mode};
+  window.__rff = {getSignature, openMarkup, showResult, downloadFile, canShareFile, say, h, escH, today, uidT, cap, setMode, profile: () => profile, mode: () => mode};
 })();
 </script>
 <script>/* PDF tools, like iLovePDF: merge, split, compress, organise, edit, sign, fillable forms, watermark, page numbers,

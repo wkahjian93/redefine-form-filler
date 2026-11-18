@@ -137,7 +137,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const row = document.querySelector('#aSave'); if (!row) return;
     const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = 'Sign out'; b.style.marginRight = 'auto';
-    b.onclick = () => { store(null); location.reload(); };
+    b.onclick = () => { store(null); try { localStorage.removeItem('rff.draft'); } catch (e) {} location.reload(); };
     row.parentElement.prepend(b);
   });
 })();

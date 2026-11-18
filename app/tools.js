@@ -156,10 +156,51 @@
   }
   async function inkFromPhoto(file) {
     const bmp = await createImageBitmap(file), k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = bmp.width * k; c.height = bmp.height * k; const g = c.getContext('2d'); g.drawImage(bmp, 0, 0, c.width, c.height);
+    const c = document.createElement('canvas'); c.width = bmp.width * k; c.height = bmp.height * k; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
     const im = g.getImageData(0, 0, c.width, c.height), d = im.data;
     for (let i = 0; i < d.length; i += 4) { const l = .3 * d[i] + .59 * d[i + 1] + .11 * d[i + 2], a = Math.max(0, Math.min(255, (175 - l) * 3)); d[i] = 10; d[i + 1] = 26; d[i + 2] = 74; d[i + 3] = a; }
     g.putImageData(im, 0, 0); const t = trimmed(c); if (!t) throw new Error('blank'); return t;
+  }
+
+  function getSignature(opt) {
+    opt = opt || {};
+    return new Promise(done => {
+      const m = h(`<div class="modal open sigsheet"><div>
+        <h3>${escH(opt.title || 'Signature')}</h3>
+        <p class="note" style="margin:4px 0 8px">Hand the phone to the client to sign with a finger, or add a photo or picture of their signature.</p>
+        <canvas class="sigpad" style="height:min(42vh,240px)"></canvas>
+        <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+          <button class="btn sm" data-a="clear">Clear</button>
+          <label class="btn sm">Photo of signature<input type="file" accept="image/*" hidden></label>
+          <button class="btn sm" data-a="paste">Paste picture</button>
+          ${opt.mine && profile.signature ? '<button class="btn sm" data-a="mine">Use my saved signature</button>' : ''}
+        </div>
+        <div class="sigpaste" contenteditable="true" aria-label="Paste a signature picture here" style="margin-top:8px;border:1px dashed var(--rule);border-radius:8px;padding:8px;font-size:13px;color:var(--ink-2);min-height:20px">Or long-press here and choose Paste</div>
+        <p class="note sigmsg" role="alert" style="margin:6px 0 0"></p>
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-a="cancel">Cancel</button><button class="btn primary" data-a="use">Use this signature</button></div>
+      </div></div>`);
+      document.body.appendChild(m);
+      const pad = sigPad(m.querySelector('canvas')), msg = m.querySelector('.sigmsg');
+      let picked = null;
+      const showPicked = d => { picked = d; pad.clear(); const g = m.querySelector('canvas'); const im = new Image(); im.onload = () => { const r = g.getBoundingClientRect(), ctx = g.getContext('2d'), k = Math.min((r.width - 20) / im.width, (r.height - 20) / im.height, 1); ctx.drawImage(im, (r.width - im.width * k) / 2, (r.height - im.height * k) / 2, im.width * k, im.height * k); }; im.src = d; msg.textContent = 'Picture added. Tap Use this signature, or Clear to sign instead.'; };
+      const fromBlob = async b => { try { showPicked(await inkFromPhoto(b)); } catch (e) { msg.textContent = 'No signature found in that picture. Use a clear photo on white paper.'; } };
+      const close = v => { document.removeEventListener('paste', onPaste, true); m.remove(); done(v); };
+      const onPaste = e => { const f = [...((e.clipboardData && e.clipboardData.items) || [])].find(i => /^image\//.test(i.type)); if (!f) { if (e.target.closest && e.target.closest('.sigpaste')) { e.preventDefault(); msg.textContent = 'There is no picture to paste. Copy the signature picture first.'; } return; } e.preventDefault(); fromBlob(f.getAsFile()); };
+      document.addEventListener('paste', onPaste, true);
+      m.querySelector('canvas').addEventListener('pointerdown', () => { picked = null; msg.textContent = ''; });
+      m.querySelector('input[type=file]').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) fromBlob(f); };
+      m.addEventListener('click', async e => {
+        const a = e.target.closest('[data-a]'); if (!a) return;
+        if (a.dataset.a === 'clear') { pad.clear(); picked = null; msg.textContent = ''; }
+        if (a.dataset.a === 'cancel') close(null);
+        if (a.dataset.a === 'mine') close(profile.signature);
+        if (a.dataset.a === 'use') { const d = picked || pad.dataURL(); if (!d) { msg.textContent = 'Sign in the box first.'; return; } close(d); }
+        if (a.dataset.a === 'paste') {
+          try { const items = await navigator.clipboard.read(); for (const it of items) { const t = it.types.find(x => /^image\//.test(x)); if (t) { fromBlob(await it.getType(t)); return; } } msg.textContent = 'There is no picture to paste. Copy the signature picture first.'; }
+          catch (err) { msg.textContent = 'This browser blocked pasting. Long-press the dotted box below and choose Paste.'; }
+        }
+      });
+    });
   }
 
   /* ---------------- files ---------------- */
@@ -540,7 +581,12 @@
     q('#mkField').onclick = e => popMenu(e.currentTarget, [['text', 'Text box'], ['check', 'Tick box'], ['choice', 'Drop-down choice'], ['sign', 'Signature box (for the client)'], ['date', 'Date box']].map(([k, l]) => ({label: l, run: () => { fieldN++; addObj({type: 'field', ft: k, name: {text: 'Text', check: 'Tick', choice: 'Choice', sign: 'Signature', date: 'Date'}[k] + ' ' + fieldN, options: k === 'choice' ? 'Yes, No' : '', w: k === 'check' ? .03 : k === 'sign' ? .3 : .26, h: k === 'check' ? .021 : k === 'sign' ? .06 : .028, x: .3, y: .45}); }})));
     q('#mkText').onclick = () => addObj({type: 'text', text: 'Type here', size: .028, color: '#0a1a4a'});
     q('#mkDate').onclick = () => addObj({type: 'text', text: today(), size: .024, color: '#0a1a4a'});
-    q('#mkSig').onclick = () => { if (!profile.signature) { say('Save your signature in My profile first.'); return setMode('profile'); } const im = new Image(); im.onload = () => addObj({type: 'img', src: profile.signature, w: .26, ar: im.height / im.width}); im.src = profile.signature; };
+    const addSig = src => { const im = new Image(); im.onload = () => addObj({type: 'img', src, w: .26, ar: im.height / im.width}); im.src = src; };
+    q('#mkSig').onclick = e => popMenu(e.currentTarget, [
+      {label: 'My signature', sub: profile.signature ? 'Saved in My profile' : 'Not saved yet', run: () => { if (!profile.signature) { say('Save your signature in My profile first.'); return setMode('profile'); } addSig(profile.signature); }},
+      {label: 'Client signs now', sub: 'Hand over the phone or iPad', run: async () => { const d = await getSignature({title: 'Client signature'}); if (d) addSig(d); }},
+      {label: 'Client signature from a picture', sub: 'Photo, or paste a picture', run: async () => { const d = await getSignature({title: 'Client signature'}); if (d) addSig(d); }}
+    ]);
     q('#mkMe').onclick = e => popMenu(e.currentTarget, myItems().map(it => ({label: it.label, sub: it.text, run: () => addObj({type: 'text', text: it.text, size: .024, color: '#0a1a4a'})})), 'Nothing saved yet. Add your details in My profile.');
     q('#mkWm').onclick = () => { watermark.on = !watermark.on; q('#mkWm').setAttribute('aria-pressed', String(watermark.on)); selId = watermark.on ? 'wm' : null; drawWatermarks(); panel(); };
     q('#mkDone').onclick = finish;
@@ -726,14 +772,14 @@
     b.onclick = async () => { const c = cur(); if (!c) return say('Select a customer first.'); b.disabled = true; try { const {bytes} = await fillFor(c); await openMarkup({pdf: bytes, name: fileName(c), back: 'fill'}); } finally { b.disabled = false; } };
   }
   let lastField = null;
-  q('#cEdit').addEventListener('focusin', e => { if (e.target.matches('input[data-k]')) lastField = e.target; });
+  q('#p3').addEventListener('focusin', e => { if (e.target.matches('input[data-k]')) lastField = e.target; });
   const meBar = h(`<div class="mebar" id="meBar"></div>`); q('#p3 .cols').before(meBar);
   function renderMeBar() {
     const items = myItems().filter(i => i.label !== "Today's date" || true);
     meBar.innerHTML = `<span class="note">Insert my details:</span>${items.map((it, i) => `<button class="chip" data-i="${i}" title="${escH(it.text)}">${escH(it.label)}</button>`).join('')}${FIELDS.some(([k]) => profile[k]) ? '' : '<button class="chip" data-go>Set up My profile</button>'}`;
-    meBar.querySelectorAll('[data-i]').forEach(b => { b.onpointerdown = e => e.preventDefault(); b.onclick = () => { const a = document.activeElement; if (a && a.matches && a.matches('#cEdit input[data-k]')) lastField = a; if (!lastField || !document.body.contains(lastField)) return say('Tap a field first, then tap your detail.'); lastField.value = items[+b.dataset.i].text; lastField.dispatchEvent(new Event('input', {bubbles: true})); lastField.focus(); }; });
+    meBar.querySelectorAll('[data-i]').forEach(b => { b.onpointerdown = e => e.preventDefault(); b.onclick = () => { const a = document.activeElement; if (a && a.matches && a.matches('#p3 input[data-k]')) lastField = a; if (!lastField || !document.body.contains(lastField)) return say('Tap a field first, then tap your detail.'); lastField.value = items[+b.dataset.i].text; lastField.dispatchEvent(new Event('input', {bubbles: true})); lastField.focus(); }; });
     const g = meBar.querySelector('[data-go]'); if (g) g.onclick = () => setMode('profile');
   }
   renderMeBar();
-  window.__rff = {openMarkup, showResult, downloadFile, canShareFile, say, h, escH, today, uidT, cap, setMode, profile: () => profile, mode: () => mode};
+  window.__rff = {getSignature, openMarkup, showResult, downloadFile, canShareFile, say, h, escH, today, uidT, cap, setMode, profile: () => profile, mode: () => mode};
 })();
