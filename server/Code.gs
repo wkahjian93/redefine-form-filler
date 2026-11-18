@@ -323,7 +323,8 @@ function ioLibrary() {
     all = all.concat(k.chunks);
   }
   if (!first) fail('no_pack');
-  return {chunks: all, catalog: first.catalog || [], syn: first.syn || {}};
+  return {chunks: all, catalog: first.catalog || [], syn: first.syn || {}, uw: all.filter(function (c) { return /^Study Pack: Underwriting index/.test(c.s); }),
+    prod: all.filter(function (c) { return /^Study Pack: Product index/.test(c.s); })};
 }
 /* plain keyword search: question words (plus Chinese/Malay synonyms) weighted by how rare they are */
 var IO_STOP = ' a an the to of in on for and or is are do does how what where when can i my me we you it this that with from be at by as please check find get need want ask nak saya macam mana boleh ';
@@ -386,7 +387,7 @@ function ioAttachments(q) {
   images.forEach(function (b) { if (typeof b !== 'string' || b.length > 3000000 || !/^[A-Za-z0-9+\/]+=*$/.test(b.slice(0, 200))) fail('invalid_request'); });
   return {images: images, doc: String(q.doc || '').slice(0, 40000)};
 }
-function ioPrompt(question, found, catalog, history, att) {
+function ioPrompt(question, found, catalog, history, att, uw, prod) {
   att = att || {images: [], doc: ''};
   var src = found.map(function (c, i) { return '[' + (i + 1) + '] ' + c.s + ' | ' + c.h + '\n' + c.x; }).join('\n\n---\n\n');
   var chat = (history || []).map(function (t) { return 'Agent: ' + t.q + '\nYou answered: ' + (t.a || '(a step-by-step guide)'); }).join('\n\n');
@@ -400,6 +401,8 @@ function ioPrompt(question, found, catalog, history, att) {
     '5. For anything about a specific client (their premium, underwriting decision, claim outcome), explain where the agent checks it, never guess the result. Never repeat personal data.',
     '6. Product or rule details: quote the document name and date from the source, and remind them to confirm with the latest PDF on ePartner. Do not give personalised financial advice.',
     '7. If unsure or the sources conflict, say so, set confidence "low", and suggest ICM (Home → Quick Links → Mailbox) or Agent Careline 03-4259 8111.',
+    uw ? '11. HEALTH AND INSURABILITY: the agent is asking whether a client with a health condition (or family history, weight/BMI, occupation, residency) can be insured. Answer from the "Underwriting index (Field Underwriting Guide, Oct 2026)" sources first: name the condition entry and page, what underwriting looks at, the reports or tests usually required (e.g. MAR, ME, GE14), and the guide\'s Best Case and Worst Case outcome (standard terms, loading, exclusion, postpone or decline) for each cover (Life, TPD, DD, H&S). Say clearly that this is only the guide\'s indication: the actual decision is made by GE underwriting after full and honest disclosure on the proposal form, and non-disclosure can make the policy void. Never promise acceptance or standard terms. If the condition is not in the guide, say so and suggest asking New Business underwriting through ICM before applying.' : '',
+    prod ? '12. PRODUCT KNOWLEDGE: the agent is asking about a GE product or rider. Answer from its "Product index" entry and its Agency Manual / FAQ sources: give the plan or rider code, who can buy it (entry ages), terms, benefits and conditions exactly as written, each with the document name and date. Do not quote premiums, commission or illustration figures unless they are in the sources, and remind the agent to use the latest Agency Manual, brochure and sales illustration with clients. This is product education, not personal financial advice.' : '',
     '10. ACCURACY: read ALL the sources before answering, not just the first. Next to every rule, number, limit, form code or document requirement, name the GE document it comes from and its date, e.g. "(Guide - Policy Loan, 3 Mar)". If sources disagree, say so and prefer the one with the newest date. Never state a figure that is not in the sources.',
     'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
     '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
@@ -411,14 +414,45 @@ function ioPrompt(question, found, catalog, history, att) {
     '', 'AGENT QUESTION: ' + question
   ].join('\n');
 }
+/* "can my client with X buy insurance?" - the Field Underwriting Guide entries are read first for these */
+var IO_UW_ASK = /\b(can|could|boleh|layak|able)\b.{0,40}\b(buy|beli|ambil|apply|insur\w*|cover\w*|accept\w*|sign up|get)\b|\binsurable\b|\bunderwrit\w*|\bloading\b|\bexclusion\b|\bpostpone\w*|\bdeclin\w*|(可以|能|能不能|可不可以|会不会|能否).{0,15}(买|投保|受保|保|接受|批)|能买|可以买|买得到|保得到|拒保|加费|除外|核保/;
+/* condition entries named in the question first; the client's own condition before family history unless a relative is mentioned */
+function ioUwRank(question, found, syn) {
+  var q = question.toLowerCase(), terms = ioTerms(question, syn).filter(function (w) { return w.length > 2 && !/^(underwriting|client|buy|can|could|insurance|insurans|still|apply|cover|get|policy|loading|exclusion|boleh|beli|ada|kalau)$/.test(w); });
+  var relative = /(father|mother|parent|brother|sister|sibling|family|dad|mum|mom|bapa|ayah|ibu|emak|adik|abang|kakak|keluarga|父|母|爸|妈|兄|弟|姐|妹|家族|家人)/.test(q);
+  var named = function (c) { return /^Underwriting: /.test(c.h) && terms.some(function (w) { return c.h.toLowerCase().indexOf(w) >= 0; }) ? 2 : 0; };
+  var fam = function (c) { return /^Underwriting: Family history/.test(c.h) ? (relative ? 1 : -1) : 0; };
+  return found.map(function (c, i) { return {c: c, k: named(c) + fam(c), i: i}; }).sort(function (a, b) { return b.k - a.k || a.i - b.i; }).map(function (o) { return o.c; });
+}
+/* products / riders named in the question (by abbreviation, code or Chinese name in the entry's [tags]) */
+function ioProdNamed(question, lib) {
+  var q = ' ' + question.toLowerCase() + ' ' + ioTerms(question, lib.syn).join(' ') + ' ';
+  return lib.prod.filter(function (c) {
+    var m = /\[([^\]]*)\]/.exec(c.h); if (!m) return false;
+    return m[1].split(',').some(function (t) { t = t.trim(); return t.length >= 3 && (/[\u3400-\u9fff]/.test(t) ? q.indexOf(t) >= 0 : ioHas(q, t)); });
+  });
+}
 function ioAsk(q) {
   var question = String(q.question || '').trim();
   if (!question || question.length > 600) fail('invalid_request');
   var history = ioHistory(q.history), att = ioAttachments(q), lib = ioLibrary();
   // search with the new question first, then the earlier questions (and the start of an attached PDF), so short follow-ups still find the right documents
   var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).concat(att.doc ? [att.doc.slice(0, 600)] : []).join(' ');
-  var found = ioSearch(searchText, lib, IO_SOURCES, question);
-  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att), images: att.images}, IO_MAX_IMAGES);
+  var found = ioSearch(searchText, lib, IO_SOURCES, question), uw = false;
+  if (IO_UW_ASK.test(question.toLowerCase()) && lib.uw.length) { // underwriting entries first, then the rest
+    var uwFound = ioUwRank(question, ioSearch(searchText, {chunks: lib.uw, syn: lib.syn}, 30, question), lib.syn).slice(0, 6), seen = {}, size = 0;
+    uwFound.forEach(function (c) { seen[c.h] = 1; });
+    found = uwFound.concat(found.filter(function (c) { return !seen[c.h]; })).filter(function (c) { size += c.x.length; return size <= IO_MAX_CHARS; }).slice(0, IO_SOURCES);
+    uw = uwFound.length > 0;
+  }
+  var prod = false, named = lib.prod && lib.prod.length ? ioProdNamed(searchText, lib) : [];
+  if (named.length) { // a named product leads (its 2 best entries), then up to 4 underwriting entries
+    var keep = uw ? found.filter(function (c) { return /^Study Pack: Underwriting index/.test(c.s); }) : [], pseen = {}, psize = 0;
+    var front = named.slice(0, 2).concat(keep.slice(0, 4)); front.forEach(function (c) { pseen[c.h] = 1; });
+    found = front.concat(found.filter(function (c) { return !pseen[c.h]; })).filter(function (c) { psize += c.x.length; return psize <= IO_MAX_CHARS; }).slice(0, IO_SOURCES);
+    prod = true;
+  }
+  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att, uw, prod), images: att.images}, IO_MAX_IMAGES);
   return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
 
