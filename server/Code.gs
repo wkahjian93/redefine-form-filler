@@ -324,7 +324,9 @@ function ioLibrary() {
   }
   if (!first) fail('no_pack');
   return {chunks: all, catalog: first.catalog || [], syn: first.syn || {}, uw: all.filter(function (c) { return /^Study Pack: Underwriting index/.test(c.s); }),
-    prod: all.filter(function (c) { return /^Study Pack: Product index/.test(c.s); })};
+    prod: all.filter(function (c) { return /^Study Pack: Product index/.test(c.s); }),
+    cs: all.filter(function (c) { return /^Study Pack: CS transaction index/.test(c.s) || /customer-service-manual|Customer Service Manual/.test(c.h); }),
+    nb: all.filter(function (c) { return /^Study Pack: Underwriting index/.test(c.s) || /limit table|Underwriting essentials|Medical & Financial|underwriting-process|new-business\/(?!form-library)/i.test(c.h); })};
 }
 /* plain keyword search: question words (plus Chinese/Malay synonyms) weighted by how rare they are */
 var IO_STOP = ' a an the to of in on for and or is are do does how what where when can i my me we you it this that with from be at by as please check find get need want ask nak saya macam mana boleh ';
@@ -387,7 +389,7 @@ function ioAttachments(q) {
   images.forEach(function (b) { if (typeof b !== 'string' || b.length > 3000000 || !/^[A-Za-z0-9+\/]+=*$/.test(b.slice(0, 200))) fail('invalid_request'); });
   return {images: images, doc: String(q.doc || '').slice(0, 40000)};
 }
-function ioPrompt(question, found, catalog, history, att, uw, prod) {
+function ioPrompt(question, found, catalog, history, att, uw, prod, stage) {
   att = att || {images: [], doc: ''};
   var src = found.map(function (c, i) { return '[' + (i + 1) + '] ' + c.s + ' | ' + c.h + '\n' + c.x; }).join('\n\n---\n\n');
   var chat = (history || []).map(function (t) { return 'Agent: ' + t.q + '\nYou answered: ' + (t.a || '(a step-by-step guide)'); }).join('\n\n');
@@ -403,8 +405,12 @@ function ioPrompt(question, found, catalog, history, att, uw, prod) {
     '7. If unsure or the sources conflict, say so, set confidence "low", and suggest ICM (Home → Quick Links → Mailbox) or Agent Careline 03-4259 8111.',
     uw ? '11. HEALTH AND INSURABILITY: the agent is asking whether a client with a health condition (or family history, weight/BMI, occupation, residency) can be insured. Answer from the "Underwriting index (Field Underwriting Guide, Oct 2026)" sources first: name the condition entry and page, what underwriting looks at, the reports or tests usually required (e.g. MAR, ME, GE14), and the guide\'s Best Case and Worst Case outcome (standard terms, loading, exclusion, postpone or decline) for each cover (Life, TPD, DD, H&S). Say clearly that this is only the guide\'s indication: the actual decision is made by GE underwriting after full and honest disclosure on the proposal form, and non-disclosure can make the policy void. Never promise acceptance or standard terms. If the condition is not in the guide, say so and suggest asking New Business underwriting through ICM before applying.' : '',
     prod ? '12. PRODUCT KNOWLEDGE: the agent is asking about a GE product or rider. Answer from its "Product index" entry and its Agency Manual / FAQ sources: give the plan or rider code, who can buy it (entry ages), terms, benefits and conditions exactly as written, each with the document name and date. Do not quote premiums, commission or illustration figures unless they are in the sources, and remind the agent to use the latest Agency Manual, brochure and sales illustration with clients. This is product education, not personal financial advice.' : '',
+    stage === 'cs' ? '13. STAGE - POLICY ALREADY IN FORCE: this question is about a policy that is already in force (servicing / after-sales). Answer from the Customer Service Manual sources (the "CS transaction index" and the customer-service-manual guidelines and FAQs). Do not apply new-business or Field Underwriting Guide rules unless the CS source itself says underwriting is needed. Set "stage":"in_force".' :
+    stage === 'nb' ? '13. STAGE - BEFORE THE POLICY IS IN FORCE: this question is about a client who has not bought yet, or a case still in new business (proposal, pending, underwriting). Answer from the Field Underwriting Guide sources (the "Underwriting index" and the underwriting essentials / medical & financial limit tables: limits, medical and financial requirements, BMI, occupation, residency, medical conditions) and new-business documents. Do not use Customer Service Manual (in-force servicing) rules. Set "stage":"before_in_force".' :
+    stage === 'unclear' ? '13. STAGE: it is not clear whether this is about a policy already in force (Customer Service Manual) or a case before it is in force (Field Underwriting Guide). Answer for the more likely one, say in the first sentence which one you assumed, ask the agent to confirm, and set "stage":"unclear".' : '',
+    '14. ASK FIRST IF UNSURE: if the question is too vague to answer accurately and the answer would really differ depending on a missing detail (e.g. traditional vs investment-linked policy, which product or rider, which claim type, the client\'s age, policy in force or not), do NOT guess: set "kind":"clarify", put ONE short question for the agent in "question" (in the agent\'s language), 2-4 short likely replies in "options", and leave "steps" empty. Ask at most once: if the CONVERSATION SO FAR shows you already asked, answer now and state the assumption you made. Do not ask when the sources already give one clear answer.',
     '10. ACCURACY: read ALL the sources before answering, not just the first. Next to every rule, number, limit, form code or document requirement, name the GE document it comes from and its date, e.g. "(Guide - Policy Loan, 3 Mar)". If sources disagree, say so and prefer the one with the newest date. Never state a figure that is not in the sources.',
-    'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered","title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low"}',
+    'Return ONLY a JSON object: {"kind":"steps"|"info"|"not_covered"|"clarify","question":"only for clarify: the one question to ask the agent","options":["only for clarify: 2-4 short likely replies"],"title":"short title","answer":"1-3 sentence direct answer","steps":[{"t":"step text","path":["Menu","Sub-menu"]}],"notes":["extra tip"],"guide":"guide id or null","sources":[source numbers used],"confidence":"high"|"medium"|"low","stage":"in_force"|"before_in_force"|"unclear"|"n/a"}',
     '', 'GUIDES (id: title):', catalog.map(function (g) { return g.id + ': ' + g.title; }).join('\n'),
     '8. This may be a follow-up in a chat. Use the CONVERSATION SO FAR only to understand what the agent means (e.g. "that form", "how about SRM", "那个呢"). Facts must still come from the SOURCES, never from earlier answers alone. If the follow-up changes topic, just answer the new question.',
     att.images.length || att.doc ? '9. ATTACHMENTS: the agent attached ' + (att.images.length ? att.images.length + ' image(s) (photos, screenshots or PDF pages, after this text)' : '') + (att.images.length && att.doc ? ' and ' : '') + (att.doc ? 'text from a PDF (below)' : '') + '. Read them for the details of this case (product, plan code, status, error message, dates, amounts, which form) and answer about THIS document. Rules and procedures must still come from the SOURCES. Never repeat names, IC, addresses, phone, policy or account numbers from the attachments: say "the policyholder" or "this policy". If an attachment is unreadable, say which one and ask for a clearer photo.' : '',
@@ -418,11 +424,26 @@ function ioPrompt(question, found, catalog, history, att, uw, prod) {
 var IO_UW_ASK = /\b(can|could|boleh|layak|able)\b.{0,40}\b(buy|beli|ambil|apply|insur\w*|cover\w*|accept\w*|sign up|get)\b|\binsurable\b|\bunderwrit\w*|\bloading\b|\bexclusion\b|\bpostpone\w*|\bdeclin\w*|(可以|能|能不能|可不可以|会不会|能否).{0,15}(买|投保|受保|保|接受|批)|能买|可以买|买得到|保得到|拒保|加费|除外|核保/;
 /* condition entries named in the question first; the client's own condition before family history unless a relative is mentioned */
 function ioUwRank(question, found, syn) {
-  var q = question.toLowerCase(), terms = ioTerms(question, syn).filter(function (w) { return w.length > 2 && !/^(underwriting|client|buy|can|could|insurance|insurans|still|apply|cover|get|policy|loading|exclusion|boleh|beli|ada|kalau)$/.test(w); });
+  var q = question.toLowerCase(), terms = ioTerms(question, syn).filter(function (w) { return w.length > 3 && !/^\d+$/.test(w) && !/^(underwriting|client|buy|can|could|insurance|insurans|still|apply|cover|get|policy|loading|exclusion|boleh|beli|ada|kalau)$/.test(w); });
   var relative = /(father|mother|parent|brother|sister|sibling|family|dad|mum|mom|bapa|ayah|ibu|emak|adik|abang|kakak|keluarga|父|母|爸|妈|兄|弟|姐|妹|家族|家人)/.test(q);
   var named = function (c) { return /^Underwriting: /.test(c.h) && terms.some(function (w) { return c.h.toLowerCase().indexOf(w) >= 0; }) ? 2 : 0; };
   var fam = function (c) { return /^Underwriting: Family history/.test(c.h) ? (relative ? 1 : -1) : 0; };
   return found.map(function (c, i) { return {c: c, k: named(c) + fam(c), i: i}; }).sort(function (a, b) { return b.k - a.k || a.i - b.i; }).map(function (o) { return o.c; });
+}
+/* Stage: is the question about a policy ALREADY IN FORCE (-> Customer Service Manual) or a case BEFORE it is in force
+   (buying, proposal, pending, underwriting -> Field Underwriting Guide)? 'cs', 'nb', 'unclear' or '' (neither). */
+var IO_CS_HINT = /\b(in ?force|inforced|existing polic\w*|current polic\w*|already (bought|have|has|issued|in ?force)|policy ?(holder|owner)|after (the )?policy|surrender\w*|policy loan|loan|lapse\w*|reinstat\w*|reviv\w*|nominee|trustee|assign\w*|ownership|change (of )?address|pay(ment)? method|payment frequency|frequency of payment|giro|easi ?pay|top.?up|switch\w* (of )?fund\w*|partial (withdraw\w*|surrender)|withdraw\w*|paid.?up|extended term|duplicate polic\w*|signature|free.?look|freelook|add (a )?rider|cancel\w* (the )?(rider|polic\w*)|policy servic\w*)\b|已生效|现有保单|已经买|已买了|退保|贷款|复效|断保|失效|受益人|更改|换基金|停缴|保单服务|polisi sedia ada|sudah beli|serah balik|pinjaman|luput|tukar penama|tukar pemilik/;
+var IO_NB_HINT = /\b(before (buying|buy|purchas\w*|in ?force|issu\w*|submit\w*)|not (yet )?(in ?force|issued|approved)|pending|outstanding requirement\w*|proposal|new business|nb|underwrit\w*|medical (check\w*|exam\w*|requirement\w*|limit\w*)|non.?medical limit\w*|financial (limit\w*|requirement\w*|underwriting)|me|juvenile|bmi|prospect\w*|wants? to buy|plan(ning)? to buy|can (still )?buy|insurable|sum assured limit\w*|max(imum)? (sum assured|coverage)|coverage limit\w*|submit (a |the )?case)\b|投保|新单|核保|体检|还没生效|未生效|还没买|想买|准备买|cadangan|permohonan baru|nak beli|belum (berkuat ?kuasa|beli)/;
+function ioStage(q, override, prevQ) {
+  if (override === 'cs' || override === 'nb') return override;
+  var cs = IO_CS_HINT.test(q), nb = IO_NB_HINT.test(q) || IO_UW_ASK.test(q);
+  if (cs && nb) {
+    if (/\b(before|pending|proposal|new business|not (yet )?(in ?force|issued))\b|未生效|还没|belum/.test(q)) return 'nb';
+    if (/\b(in ?force|inforced|existing|already)\b|已生效|现有|已经买|sudah|sedia ada/.test(q)) return 'cs';
+    return 'unclear';
+  }
+  if (cs) return 'cs'; if (nb) return 'nb';
+  return prevQ ? ioStage(prevQ, '', '') : ''; // a short follow-up keeps the stage of the question before it
 }
 /* products / riders named in the question (by abbreviation, code or Chinese name in the entry's [tags]) */
 function ioProdNamed(question, lib) {
@@ -438,12 +459,20 @@ function ioAsk(q) {
   var history = ioHistory(q.history), att = ioAttachments(q), lib = ioLibrary();
   // search with the new question first, then the earlier questions (and the start of an attached PDF), so short follow-ups still find the right documents
   var searchText = [question].concat(history.slice().reverse().map(function (t) { return t.q; })).concat(att.doc ? [att.doc.slice(0, 600)] : []).join(' ');
+  var stage = ioStage(question.toLowerCase(), String(q.stage || ''), history.length ? history[history.length - 1].q.toLowerCase() : '');
+  if (stage === 'unclear') return {stage: 'unclear', sources: [], clarify: {question: 'Is this policy already in force?', why: 'The rules differ: a policy in force follows the Customer Service Manual, a case before in force follows the Field Underwriting Guide.',
+    options: [{label: 'Already in force', stage: 'cs'}, {label: 'Not in force yet / client still buying', stage: 'nb'}]}}; // no AI call, no daily-limit use
   var found = ioSearch(searchText, lib, IO_SOURCES, question), uw = false;
-  if (IO_UW_ASK.test(question.toLowerCase()) && lib.uw.length) { // underwriting entries first, then the rest
-    var uwFound = ioUwRank(question, ioSearch(searchText, {chunks: lib.uw, syn: lib.syn}, 30, question), lib.syn).slice(0, 6), seen = {}, size = 0;
+  if (stage === 'cs' && lib.cs && lib.cs.length) { // in force: Customer Service Manual entries first
+    var csFound = ioSearch(searchText, {chunks: lib.cs, syn: lib.syn}, 5, question), cseen = {}, csize = 0;
+    csFound.forEach(function (c) { cseen[c.h] = 1; });
+    found = csFound.concat(found.filter(function (c) { return !cseen[c.h] && !/^Study Pack: Underwriting index/.test(c.s); })).filter(function (c) { csize += c.x.length; return csize <= IO_MAX_CHARS; }).slice(0, IO_SOURCES);
+  }
+  if (stage !== 'cs' && (stage === 'nb' || IO_UW_ASK.test(question.toLowerCase())) && lib.uw.length) { // before in force: underwriting entries first, then the rest
+    var uwFound = ioUwRank(question, ioSearch(searchText, {chunks: stage === 'nb' && lib.nb ? lib.nb : lib.uw, syn: lib.syn}, 30, question), lib.syn).slice(0, 6), seen = {}, size = 0;
     uwFound.forEach(function (c) { seen[c.h] = 1; });
     found = uwFound.concat(found.filter(function (c) { return !seen[c.h]; })).filter(function (c) { size += c.x.length; return size <= IO_MAX_CHARS; }).slice(0, IO_SOURCES);
-    uw = uwFound.length > 0;
+    uw = uwFound.length > 0 && (IO_UW_ASK.test(question.toLowerCase()) || /^Underwriting: /.test(uwFound[0].h)); // the health rule only for health questions
   }
   var prod = false, named = lib.prod && lib.prod.length ? ioProdNamed(searchText, lib) : [];
   if (named.length) { // a named product leads (its 2 best entries), then up to 4 underwriting entries
@@ -452,8 +481,8 @@ function ioAsk(q) {
     found = front.concat(found.filter(function (c) { return !pseen[c.h]; })).filter(function (c) { psize += c.x.length; return psize <= IO_MAX_CHARS; }).slice(0, IO_SOURCES);
     prod = true;
   }
-  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att, uw, prod), images: att.images}, IO_MAX_IMAGES);
-  return {text: r.text, truncated: r.truncated, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
+  var r = askAI({prompt: ioPrompt(question, found, lib.catalog, history, att, uw, prod, stage), images: att.images}, IO_MAX_IMAGES);
+  return {text: r.text, truncated: r.truncated, stage: stage, sources: found.map(function (c) { return {s: c.s, h: c.h}; })};
 }
 
 /* Run once from the editor to approve Drive and external-request access. */
